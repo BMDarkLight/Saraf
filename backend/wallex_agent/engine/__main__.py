@@ -28,6 +28,7 @@ def main() -> None:
     r = sub.add_parser("run")
     r.add_argument("--mode", choices=["shadow", "live"], default=None)
     r.add_argument("--confirm-live", action="store_true")
+    r.add_argument("--hours", type=float, help="stop after this many hours (shadow sessions); positions are closed to TMN")
     rep = sub.add_parser("report")
     rep.add_argument("dir")
     a = p.parse_args()
@@ -50,7 +51,7 @@ def main() -> None:
                 print(f"  {k}: {m.get(k)}")
     elif a.cmd == "run":
         from .runner import run_engine
-        asyncio.run(run_engine(s, a.mode or s.engine_mode, a.confirm_live))
+        asyncio.run(run_engine(s, a.mode or s.engine_mode, a.confirm_live, hours=a.hours))
     else:
         d = Path(a.dir)
         m = compute_metrics(d, s.engine_capital_tmn)

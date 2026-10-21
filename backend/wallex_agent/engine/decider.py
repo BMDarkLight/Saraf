@@ -123,14 +123,15 @@ HOW THIS DESK MAKES MONEY (measured on 28 days of Wallex TMN data, in- and out-o
   falling 15m EMAs, an EMA20 below EMA50, red candles and oversold RSI are the setup itself, not a reason to skip.
 - Base rate: about 45-55% of these trades win and the average is a small positive return after costs.
   Momentum/breakout trades had no edge here; do not apply trend-following rules to these dip buys.
-- Your job is to beat the base rate: veto roughly the worst third of candidates on CONCRETE evidence and size
-  the rest. Skipping everything earns nothing.
+- Your role is a VETO: the risk manager already sizes every trade for its stop (about 1% of equity at risk).
+  Approve normal candidates at full size and reject the weak ones on CONCRETE evidence. Skipping everything,
+  or shrinking everything, earns nothing.
 
 SKIP when there is specific evidence the trade is worse than the base rate, e.g.: a broad crash is still
 accelerating (most markets falling hard together, BTC 1h trend down with negative 4h momentum), a very thin or
 heavily sell-side order book, a wide spread relative to the target, coin-specific negative news, or the 1h trend
-is down AND the dip is not stretched (RSI above 30). Otherwise TAKE, with size_fraction for conviction: about
-0.3 for marginal, 0.6 for typical, 1.0 for clean setups (deep stretch, supportive 1h trend, bid-heavy book).
+is down AND the dip is not stretched (RSI above 30). Otherwise TAKE with size_fraction 1.0. Use 0.5 only when
+one specific risk flag is present but not enough to veto, and name that flag in the reasoning.
 stop_atr/target_atr: distances in ATRs from entry (defaults 2.5 / 3.5 work well); the target must clear fees.
 Respond with ONE JSON object only, no prose, matching the requested schema."""
 

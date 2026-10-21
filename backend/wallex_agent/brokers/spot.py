@@ -170,13 +170,21 @@ class PaperSpotBroker(SpotBroker):
         })
         del self.state.data["trades"][200:]
 
+    async def _top_of_book(self, symbol: str) -> dict:
+        """Best bid/ask from the order book; /v1/markets stats lag it (found in shadow testing)."""
+        try:
+            book = await self.client.depth(symbol)
+            return {"bid": max(float(l["price"]) for l in book["bid"]), "ask": min(float(l["price"]) for l in book["ask"])}
+        except Exception:
+            return await self.info.quote(symbol)
+
     async def _match_resting(self) -> None:
         changed = False
         for order in list(self.state.data["orders"].values()):
             if not order["active"]:
                 continue
             remaining = float(order["origQty"]) - float(order["executedQty"])
-            q = await self.info.quote(order["symbol"])
+            q = await self._top_of_book(order["symbol"])
             crossed = (order["side"] == "BUY" and q["ask"] and q["ask"] <= order["price"]) or (
                 order["side"] == "SELL" and q["bid"] and q["bid"] >= order["price"])
             if crossed:

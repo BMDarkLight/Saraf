@@ -28,7 +28,8 @@ def git_commit() -> str:
         return "unknown"
 
 
-async def run_engine(s: Settings, mode: str, confirm_live: bool = False, max_loops: int | None = None) -> None:
+async def run_engine(s: Settings, mode: str, confirm_live: bool = False, max_loops: int | None = None,
+                     hours: float | None = None) -> None:
     client = WallexClient(s.wallex_base_url, s.wallex_api_key)
     out = ROOT / "data" / "engine" / mode
     out.mkdir(parents=True, exist_ok=True)
@@ -49,6 +50,7 @@ async def run_engine(s: Settings, mode: str, confirm_live: bool = False, max_loo
 
     tf_s = s.engine_timeframe_min * 60
     last_bar = int(engine.feed.now() // tf_s)
+    stop_at = engine.feed.now() + hours * 3600 if hours else None
     loops = 0
     try:
         while max_loops is None or loops < max_loops:
@@ -64,6 +66,12 @@ async def run_engine(s: Settings, mode: str, confirm_live: bool = False, max_loo
                 journal.log("error", now, error=f"{type(e).__name__}: {e}")
             if engine.state["flattened"] and not engine.positions:
                 journal.log("stop", now, reason="challenge window over; all positions are in TMN")
+                break
+            if stop_at and now >= stop_at:
+                await engine.flatten(now, "session_end")
+                eq, cash, exp = await engine.equity()
+                journal.mark(now, eq, cash, exp, engine.risk.drawdown(eq, engine.state["peak"]))
+                journal.log("stop", now, reason=f"session of {hours:g}h finished; positions closed to TMN", equity=eq)
                 break
             await asyncio.sleep(s.engine_monitor_seconds)
     finally:
