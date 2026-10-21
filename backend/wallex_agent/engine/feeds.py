@@ -29,6 +29,7 @@ class LiveFeed:
         self.client, self.s = client, settings
         self.tf = settings.engine_timeframe_min
         self._news: dict[str, tuple[float, list[str]]] = {}
+        self._quotes: dict[str, tuple[float, dict]] = {}
         self._ctx: tuple[float, dict] | None = None
 
     def now(self) -> float:
@@ -58,9 +59,23 @@ class LiveFeed:
         return closed(resample(m1, self.tf), self.tf, now), closed(h1, 60, now)
 
     async def quote(self, symbol: str) -> dict:
+        """Best bid/ask from the live order book - the prices orders actually fill at. The /v1/markets
+        stats can lag the book (seen in shadow testing: a stale bid moved a stop and forced a bad exit),
+        so they are only a fallback."""
+        hit = self._quotes.get(symbol)
+        if hit and hit[0] > time.monotonic():
+            return hit[1]
         st = (await self.client.markets())[symbol]["stats"]
-        bid, ask, last = (safe_float(st.get(k)) for k in ("bidPrice", "askPrice", "lastPrice"))
-        return {"bid": bid or last, "ask": ask or last, "last": last}
+        last = safe_float(st.get("lastPrice"))
+        try:
+            book = await self.client.depth(symbol)
+            bid = max(safe_float(l["price"]) for l in book["bid"])
+            ask = min(safe_float(l["price"]) for l in book["ask"])
+        except Exception:
+            bid, ask = safe_float(st.get("bidPrice")), safe_float(st.get("askPrice"))
+        q = {"bid": bid or last, "ask": ask or last, "last": last}
+        self._quotes[symbol] = (time.monotonic() + 2, q)
+        return q
 
     async def bar_range(self, symbol: str) -> dict:
         q = await self.quote(symbol)

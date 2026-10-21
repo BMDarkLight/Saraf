@@ -56,9 +56,10 @@ class Engine:
         self.state_path = state_path
         self.state = {"positions": {}, "peak": settings.engine_capital_tmn, "pause_until": 0.0, "halted": False,
                       "cooldown": {}, "regime": "neutral", "regime_reason": "", "regime_at": 0.0,
-                      "seq": 0, "bars": 0, "flattened": False, "closed": []}
+                      "seq": 0, "bars": 0, "flattened": False, "closed": [], "pending": {}}
         if state_path and state_path.exists():
             self.state.update(json.loads(state_path.read_text()))
+        self.maker = settings.engine_execution == "maker" and hasattr(broker, "place_limit")
         self._last_mark = 0.0
 
     # ---------------------------------------------------------------- utils
@@ -72,17 +73,38 @@ class Engine:
     def positions(self) -> dict:
         return self.state["positions"]
 
+    @property
+    def pending(self) -> dict:
+        return self.state["pending"]
+
     async def equity(self) -> tuple[float, float, float]:
+        """(equity, free cash, exposure), valued from what the exchange actually holds: TMN (free +
+        reserved by open buys) plus every managed coin incl. coins locked in sells or just bought by
+        an entry order that filled moments ago (the engine may not have recorded it yet)."""
         cash = await self.broker.cash()
-        exposure = 0.0
-        for p in self.positions.values():
-            exposure += p["qty"] * (await self.feed.quote(p["symbol"]))["bid"]
+        total = await self.broker.total_cash() if hasattr(self.broker, "total_cash") else cash
+        exposure = total - cash
+        symbols = {p["base"]: p["symbol"] for p in [*self.positions.values(), *self.pending.values()]}
+        for base, symbol in symbols.items():
+            if hasattr(self.broker, "holding_total"):
+                qty = await self.broker.holding_total(base)
+            else:
+                qty = sum(p["qty"] for p in self.positions.values() if p["base"] == base)
+            exposure += qty * (await self.feed.quote(symbol))["bid"]
         return cash + exposure, cash, exposure
 
     async def reconcile(self) -> None:
         """After a restart, trust the exchange: drop positions whose coins are gone."""
         now = self.feed.now()
         for pid, p in list(self.positions.items()):
+            if p.get("tp_order"):
+                st = await self.broker.order_status(p["tp_order"])
+                if st.status == "filled":
+                    await self._closed(pid, st.tmn, st.price, "take_profit", now)
+                    continue
+                if st.status == "open":
+                    continue        # the coins are locked in the resting sell, not missing
+                p["tp_order"] = None  # cancelled outside the engine; monitor re-places it
             held = await self.broker.holding(p["base"])
             if held < p["qty"] * 0.5:
                 self.journal.log("reconcile", now, symbol=p["symbol"], position_id=pid,
@@ -141,7 +163,8 @@ class Engine:
                 continue
             f = compute(bars, htf)
             for c in strategy.candidates(sym, f, self.s.engine_min_atr_pct, self.s.engine_max_atr_pct, self.setups):
-                if c.score >= self.s.engine_min_score and not any(p["symbol"] == sym for p in self.positions.values()):
+                busy = any(p["symbol"] == sym for p in [*self.positions.values(), *self.pending.values()])
+                if c.score >= self.s.engine_min_score and not busy:
                     cands.append((c, f))
         cands.sort(key=lambda x: -x[0].score)
         for cand, f in cands[: self.s.engine_max_ai_calls_per_bar]:
@@ -165,7 +188,7 @@ class Engine:
     async def _consider(self, cand: strategy.Candidate, f: dict, now: float) -> None:
         eq, cash, exposure = await self.equity()
         block = self.risk.entry_block(
-            now=now, equity=eq, peak=self.state["peak"], n_positions=len(self.positions),
+            now=now, equity=eq, peak=self.state["peak"], n_positions=len(self.positions) + len(self.pending),
             regime=self.state["regime"], pause_until=self.state["pause_until"], halted=self.state["halted"],
             end_ts=self.end_ts, cooldown_until=self.state["cooldown"].get(cand.symbol, 0))
         if block:
@@ -189,25 +212,70 @@ class Engine:
             self.journal.log("risk_block", now, symbol=cand.symbol, setup=cand.setup, reason=sz.reason)
             return
         base = cand.symbol.removesuffix("TMN")
+        plan = {"symbol": cand.symbol, "base": base, "setup": cand.setup, "atr": cand.atr, "rules": cand.rules,
+                "stop_atr": dp["stop_atr"], "target_atr": dp["target_atr"], "confidence": dp["confidence"],
+                "reasoning": dp["reasoning"], "sizing": sz.reason}
+        if self.maker:   # rest a limit at the bid instead of paying the spread + taker fee
+            limit = quote["bid"]
+            try:
+                oid = await self.broker.place_limit(cand.symbol, "BUY", sz.quote_amount / limit, limit, base)
+            except Exception as e:
+                self.journal.log("error", now, symbol=cand.symbol, error=f"limit buy failed: {e}")
+                return
+            self.pending[oid] = {**plan, "order_id": oid, "limit": limit, "ask_at_order": quote["ask"], "placed_at": now,
+                                 "expires_at": now + self.s.engine_entry_timeout_bars * self.tf * 60}
+            self.journal.log("entry_order", now, symbol=cand.symbol, setup=cand.setup, order_id=oid, limit=limit,
+                             amount_tmn=sz.quote_amount, expires_in_bars=self.s.engine_entry_timeout_bars,
+                             sizing=sz.reason, reason=dp["reasoning"])
+            self.save()
+            return
         try:
             fill = await self.broker.buy(cand.symbol, sz.quote_amount, base)
         except Exception as e:
             self.journal.log("error", now, symbol=cand.symbol, error=f"buy failed: {e}")
             return
+        await self._open_position(plan, fill.qty, fill.price, fill.tmn, now)
+
+    async def _open_position(self, plan: dict, qty: float, price: float, cost: float, now: float) -> None:
         self.state["seq"] += 1
         pid = f"T{self.state['seq']:04d}"
-        # re-anchor stop/target on the actual fill
-        stop, target = self.risk.clamp_stop_target(fill.price, cand.atr, dp["stop_atr"], dp["target_atr"])
-        self.positions[pid] = {
-            "id": pid, "symbol": cand.symbol, "base": base, "setup": cand.setup, "qty": fill.qty,
-            "entry_price": fill.price, "cost_tmn": fill.tmn, "entry_time": now, "stop": stop, "initial_stop": stop,
-            "target": target, "atr": cand.atr, "highest": fill.price, "bars_held": 0,
-            "ai_confidence": dp["confidence"], "reasoning": dp["reasoning"], "rules": cand.rules,
-        }
-        self.journal.log("entry", now, symbol=cand.symbol, setup=cand.setup, position_id=pid, qty=fill.qty,
-                         price=fill.price, cost_tmn=fill.tmn, stop=stop, target=target, sizing=sz.reason,
-                         reason=dp["reasoning"])
+        stop, target = self.risk.clamp_stop_target(price, plan["atr"], plan["stop_atr"], plan["target_atr"])
+        p = {"id": pid, "symbol": plan["symbol"], "base": plan["base"], "setup": plan["setup"], "qty": qty,
+             "entry_price": price, "cost_tmn": cost, "entry_time": now, "stop": stop, "initial_stop": stop,
+             "target": target, "atr": plan["atr"], "highest": price, "bars_held": 0,
+             "ai_confidence": plan["confidence"], "reasoning": plan["reasoning"], "rules": plan["rules"],
+             "tp_order": None}
+        self.positions[pid] = p
+        if self.maker:   # the take-profit rests on the book as a maker sell
+            try:
+                p["tp_order"] = await self.broker.place_limit(p["symbol"], "SELL", qty, target, p["base"])
+            except Exception as e:
+                self.journal.log("error", now, symbol=p["symbol"], position_id=pid, error=f"take-profit order failed: {e}")
+        self.journal.log("entry", now, symbol=p["symbol"], setup=p["setup"], position_id=pid, qty=qty, price=price,
+                         cost_tmn=cost, stop=stop, target=target, take_profit_order=p["tp_order"],
+                         execution="maker" if self.maker else "taker", sizing=plan["sizing"], reason=plan["reasoning"])
         self.save()
+
+    async def _process_pending(self, now: float) -> None:
+        """Entry limits: open the position on fill; cancel when stale or when price ran away."""
+        for oid, o in list(self.pending.items()):
+            st = await self.broker.order_status(oid)
+            if st.status == "open":
+                ask = (await self.feed.quote(o["symbol"]))["ask"]
+                # measured from the ask at order time: the spread alone must not count as running away
+                ran_away = ask > o.get("ask_at_order", o["limit"]) + self.s.engine_entry_chase_atr * o["atr"]
+                if now < o["expires_at"] and not ran_away:
+                    continue
+                st = await self.broker.cancel(oid)
+                if st.filled_qty <= 0:
+                    del self.pending[oid]
+                    self.journal.log("entry_cancelled", now, symbol=o["symbol"], setup=o["setup"], order_id=oid,
+                                     reason="price ran away from the limit" if ran_away else "not filled in time")
+                    self.save()
+                    continue
+            del self.pending[oid]
+            if st.filled_qty > 0:
+                await self._open_position(o, st.filled_qty, st.price, st.tmn, now)
 
     async def _review_positions(self, now: float) -> None:
         for pid, p in list(self.positions.items()):
@@ -238,6 +306,7 @@ class Engine:
     # --------------------------------------------------------------- monitor
     async def monitor(self) -> None:
         now = self.feed.now()
+        await self._process_pending(now)     # record fills before valuing the account
         eq, cash, exposure = await self.equity()
         if eq > self.state["peak"]:
             self.state["peak"] = eq
@@ -264,6 +333,18 @@ class Engine:
 
         fee = self.s.engine_fee_rate
         for pid, p in list(self.positions.items()):
+            if p.get("tp_order"):
+                st = await self.broker.order_status(p["tp_order"])
+                if st.status == "filled":
+                    await self._closed(pid, st.tmn, st.price, "take_profit", now)
+                    continue
+                if st.status == "canceled":
+                    p["tp_order"] = None
+            if self.maker and not p.get("tp_order"):   # lost (restart, failed exit, manual cancel): re-place
+                try:
+                    p["tp_order"] = await self.broker.place_limit(p["symbol"], "SELL", p["qty"], p["target"], p["base"])
+                except Exception as e:
+                    self.journal.log("error", now, symbol=p["symbol"], position_id=pid, error=f"re-place take-profit: {e}")
             rng = await self.feed.bar_range(p["symbol"])
             if not rng["high"]:
                 continue
@@ -276,36 +357,57 @@ class Engine:
             if rng["low"] <= p["stop"]:
                 reason = "stop_loss" if p["stop"] < p["entry_price"] else "trailing_stop"
                 await self._exit(pid, reason, now, hint=min(p["stop"], rng["open"]))
-            elif rng["high"] >= p["target"]:
+            elif not p.get("tp_order") and rng["high"] >= p["target"]:
                 await self._exit(pid, "take_profit", now, hint=max(p["target"], rng["open"]))
 
     async def flatten(self, now: float, reason: str) -> None:
+        for oid in list(self.pending):
+            st = await self.broker.cancel(oid)
+            o = self.pending.pop(oid)
+            if st.filled_qty > 0:
+                await self._open_position(o, st.filled_qty, st.price, st.tmn, now)
         for pid in list(self.positions):
             await self._exit(pid, reason, now)
 
     async def _exit(self, pid: str, reason: str, now: float, hint: float | None = None, note: str | None = None) -> None:
+        """Market exit. A resting take-profit is cancelled first (it may have filled meanwhile)."""
         p = self.positions.get(pid)
         if not p:
             return
+        if p.get("tp_order"):
+            try:
+                st = await self.broker.cancel(p["tp_order"])
+            except Exception as e:
+                self.journal.log("error", now, symbol=p["symbol"], position_id=pid, error=f"cancel take-profit: {e}")
+                return
+            if st.status == "filled":
+                await self._closed(pid, st.tmn, st.price, "take_profit", now)
+                return
+            p["tp_order"] = None
+            self.save()
         try:
             fill = await self.broker.sell(p["symbol"], p["qty"], p["base"], hint)
         except Exception as e:
             self.journal.log("error", now, symbol=p["symbol"], position_id=pid, error=f"sell failed ({reason}): {e}")
             return  # keep the position; the next monitor pass retries
-        pnl = fill.tmn - p["cost_tmn"]
+        await self._closed(pid, fill.tmn, fill.price, reason, now, note)
+
+    async def _closed(self, pid: str, proceeds: float, price: float, reason: str, now: float,
+                      note: str | None = None) -> None:
+        p = self.positions.pop(pid)
+        pnl = proceeds - p["cost_tmn"]
         pnl_pct = round(100 * pnl / p["cost_tmn"], 3)
-        del self.positions[pid]
         self.state["cooldown"][p["symbol"]] = now + self.s.engine_cooldown_bars * self.tf * 60
         self.state["closed"].append({"id": pid, "symbol": p["symbol"], "pnl_pct": pnl_pct, "reason": reason})
         self.state["closed"] = self.state["closed"][-50:]
         self.journal.log("exit", now, symbol=p["symbol"], position_id=pid, setup=p["setup"], reason=reason,
-                         note=note, price=fill.price, proceeds_tmn=fill.tmn, pnl_tmn=pnl, pnl_pct=pnl_pct)
+                         note=note, price=price, proceeds_tmn=proceeds, pnl_tmn=pnl, pnl_pct=pnl_pct)
         self.journal.trade({
             "trade_id": pid, "symbol": p["symbol"], "setup": p["setup"],
             "entry_time": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(p["entry_time"])),
             "entry_price": p["entry_price"], "qty": p["qty"], "cost_tmn": round(p["cost_tmn"]),
-            "exit_time": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now)), "exit_price": fill.price,
-            "proceeds_tmn": round(fill.tmn), "pnl_tmn": round(pnl), "pnl_pct": pnl_pct, "exit_reason": reason,
+            "exit_time": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(now)), "exit_price": price,
+            "proceeds_tmn": round(proceeds), "pnl_tmn": round(pnl), "pnl_pct": pnl_pct, "exit_reason": reason,
             "ai_confidence": p["ai_confidence"], "entry_reasoning": p["reasoning"],
         })
         self.save()

@@ -1,8 +1,8 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # LLM (any OpenAI-compatible endpoint)
     llm_base_url: str = "https://api.openai.com/v1"
-    llm_api_key: str = Field("", validation_alias=AliasChoices("LLM_API_KEY", "OPENAI_API_KEY"))
+    llm_api_key: str = ""   # falls back to OPENAI_API_KEY only when LLM_API_KEY is empty (see get_settings)
     llm_model: str = "gpt-4o"
     llm_temperature: float = 0.2
     llm_stream: bool = True
@@ -50,13 +50,25 @@ class Settings(BaseSettings):
     engine_mode: Literal["backtest", "shadow", "live"] = "shadow"
     engine_decider: Literal["ai", "rules"] = "ai"       # "rules" = baseline without the LLM
     engine_llm_model: str = ""                          # defaults to llm_model
+    # JSON merged into the LLM request body. Thinking models must answer directly, e.g. for Qwen on
+    # GapGPT: {"reasoning_effort": "none"} (otherwise its reasoning eats the token budget: no answer)
+    engine_llm_extra_body: str = ""
     engine_capital_tmn: float = 5_000_000               # challenge base capital (return is measured vs this)
     engine_universe: str = "auto"                       # "auto" or comma-separated TMN symbols
     engine_allowed_markets: str = ""                    # challenge's allowed list; empty = no restriction
     engine_universe_size: int = 10
     engine_max_spread_pct: float = 0.4
     engine_timeframe_min: int = 15
-    engine_fee_rate: float = 0.0025                     # per side; check /v1/account/fee for the real rate
+    engine_fee_rate: float = 0.0025                     # taker, per side; check /v1/account/fee for the real rate
+    engine_maker_fee_rate: float = -1.0                 # maker; <0 = same as the taker fee (conservative)
+    # "maker": enter with a limit at the bid and rest the take-profit as a limit sell (no spread crossing);
+    # stops and emergency exits stay market orders. "taker": market orders everywhere.
+    engine_execution: Literal["maker", "taker"] = "maker"
+    engine_entry_timeout_bars: int = 2                  # cancel an unfilled entry limit after this many bars
+    # Cancel the entry limit once the ask moves this many ATRs above where it was at order time. Chosen
+    # in-sample (14d to 2026-10-14): tighter was monotonically better - a limit that only fills after the
+    # bounce has failed is adverse selection. See STRATEGY.md section 5.
+    engine_entry_chase_atr: float = 0.1
     engine_max_positions: int = 3
     engine_max_position_pct: float = 0.25               # of equity, per position
     engine_max_exposure_pct: float = 0.75               # of equity, all positions
@@ -82,6 +94,10 @@ class Settings(BaseSettings):
     data_dir: Path = ROOT / "data"
 
     @property
+    def maker_fee(self) -> float:
+        return self.engine_fee_rate if self.engine_maker_fee_rate < 0 else self.engine_maker_fee_rate
+
+    @property
     def allowlist(self) -> set[str]:
         return {s.strip().upper() for s in self.symbol_allowlist.split(",") if s.strip()}
 
@@ -89,5 +105,9 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     s = Settings()
+    # LLM_API_KEY (shell or .env) must win; a stray OPENAI_API_KEY in the shell used to override the
+    # .env key because shell variables outrank .env in pydantic-settings.
+    if not s.llm_api_key and os.environ.get("OPENAI_API_KEY"):
+        s.llm_api_key = os.environ["OPENAI_API_KEY"]
     s.data_dir.mkdir(parents=True, exist_ok=True)
     return s

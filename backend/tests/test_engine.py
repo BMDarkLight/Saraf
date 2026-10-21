@@ -229,3 +229,20 @@ async def test_spot_exec_round_trip_on_paper_broker(tmp_path):
     sell = await ex.sell("BTCTMN", buy.qty, "BTC")
     assert 0.99 < sell.tmn / buy.tmn < 1.0     # lost only fees + spread
     assert await ex.holding("BTC") < 1e-6
+
+
+async def test_ai_skip_with_zero_stop_is_a_real_decision(tmp_path):
+    """Regression (Qwen on GapGPT): SKIPs came back with stop_atr 0 and were discarded as invalid,
+    so the fail-safe - not the model - made 36 of 38 decisions."""
+    from types import SimpleNamespace as NS
+    reply = '{"action": "skip", "confidence": 0.85, "size_fraction": 0.0, "stop_atr": 0.0, "target_atr": 0.0, ' \
+            '"reasoning": "15m EMAs sloping down"}'
+
+    async def create(**kw):
+        assert kw.get("extra_body") == {"reasoning_effort": "none"}
+        return NS(choices=[NS(message=NS(content=reply))])
+    ai = AIDecider(NS(chat=NS(completions=NS(create=create))), "m", ResponseCache(tmp_path / "c.jsonl"), 0.001,
+                   extra_body={"reasoning_effort": "none"})
+    cand = strategy.Candidate("AAATMN", "oversold_reversion", 0.7, 100, 1, 2.5, 3.5, [])
+    d = await ai.decide_entry(cand, {})
+    assert d.source == "llm" and d.payload["action"] == "SKIP" and d.payload["confidence"] == 0.85

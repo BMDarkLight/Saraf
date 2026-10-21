@@ -25,29 +25,82 @@ from pathlib import Path
 from typing import Literal
 
 from openai import AsyncOpenAI
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
 from .strategy import Candidate
 
 
+def _bound(x, lo: float, hi: float, default: float) -> float:
+    """Out-of-range numbers are clamped, not rejected: models put 0 in irrelevant fields (e.g. the
+    stop of a SKIP), and one stray number must not discard an otherwise valid decision."""
+    try:
+        return min(max(float(x), lo), hi)
+    except (TypeError, ValueError):
+        return default
+
+
 class EntryDecision(BaseModel):
     action: Literal["TAKE", "SKIP"]
-    confidence: float = Field(ge=0, le=1)
-    size_fraction: float = Field(ge=0, le=1, description="fraction of the maximum allowed size")
-    stop_atr: float = Field(ge=0.8, le=3.0)
-    target_atr: float = Field(ge=1.2, le=6.0)
-    reasoning: str
+    confidence: float = 0.0
+    size_fraction: float = 0.0          # fraction of the maximum allowed size
+    stop_atr: float = 2.5
+    target_atr: float = 3.5
+    reasoning: str = ""
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def _action(cls, v):
+        return str(v).strip().upper()
+
+    @field_validator("confidence", "size_fraction", mode="before")
+    @classmethod
+    def _unit(cls, v):
+        return _bound(v, 0.0, 1.0, 0.0)
+
+    @field_validator("stop_atr", mode="before")
+    @classmethod
+    def _stop(cls, v):
+        return _bound(v, 0.8, 3.0, 2.5)
+
+    @field_validator("target_atr", mode="before")
+    @classmethod
+    def _target(cls, v):
+        return _bound(v, 1.2, 6.0, 3.5)
+
+    @model_validator(mode="after")
+    def _take_needs_size(self):
+        if self.action == "TAKE" and self.size_fraction <= 0:
+            raise ValueError("TAKE without a positive size_fraction")
+        return self
 
 
 class PositionReview(BaseModel):
     action: Literal["HOLD", "EXIT", "TIGHTEN"]
     new_stop: float | None = None
-    reasoning: str
+    reasoning: str = ""
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def _action(cls, v):
+        return str(v).strip().upper()
+
+    @field_validator("new_stop", mode="before")
+    @classmethod
+    def _stop(cls, v):
+        try:
+            return float(v) if v not in (None, "", 0, "null") else None
+        except (TypeError, ValueError):
+            return None
 
 
 class Regime(BaseModel):
     regime: Literal["risk_on", "neutral", "risk_off"]
-    reasoning: str
+    reasoning: str = ""
+
+    @field_validator("regime", mode="before")
+    @classmethod
+    def _regime(cls, v):
+        return str(v).strip().lower().replace("-", "_").replace(" ", "_")
 
 
 @dataclass
@@ -109,15 +162,17 @@ class AIDecider:
     name = "ai"
 
     def __init__(self, llm: AsyncOpenAI, model: str, cache: ResponseCache, fee_rate: float,
-                 timeout: float = 45.0, offline: bool = False):
+                 timeout: float = 45.0, offline: bool = False, extra_body: dict | None = None):
         self.llm, self.model, self.cache = llm, model, cache
+        self.extra_body = extra_body or {}   # provider switches, e.g. {"reasoning_effort": "none"} for Qwen
         self.fee_rate, self.timeout = fee_rate, timeout
         self.offline = offline  # backtest replay: cache only, never call the API
         self.calls = 0
 
     async def _ask(self, user: str, schema: type[BaseModel]) -> Decision:
         system = SYSTEM.format(fee2=2 * 100 * self.fee_rate)
-        key = hashlib.sha256(f"{self.model}\n{system}\n{user}".encode()).hexdigest()
+        opts = json.dumps(self.extra_body, sort_keys=True) if self.extra_body else ""
+        key = hashlib.sha256(f"{self.model}\n{opts}\n{system}\n{user}".encode()).hexdigest()
         raw, source = self.cache.get(key), "cache"
         if raw is None:
             if self.offline:
@@ -127,7 +182,8 @@ class AIDecider:
                 self.calls += 1
                 resp = await asyncio.wait_for(self.llm.chat.completions.create(
                     model=self.model, temperature=0, max_tokens=400,
-                    messages=[{"role": "system", "content": system}, {"role": "user", "content": user}]),
+                    messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
+                    **({"extra_body": self.extra_body} if self.extra_body else {})),
                     self.timeout)
                 raw = resp.choices[0].message.content or ""
             except Exception as e:

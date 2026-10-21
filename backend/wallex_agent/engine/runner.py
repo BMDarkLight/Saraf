@@ -7,6 +7,7 @@ import os
 import subprocess
 
 from ..brokers import LiveSpotBroker, PaperSpotBroker
+from ..brokers.spot import PAPER_FEE
 from ..config import ROOT, Settings
 from ..wallex import WallexClient
 from .backtest import make_decider
@@ -39,7 +40,8 @@ async def run_engine(s: Settings, mode: str, confirm_live: bool = False, max_loo
         spot = PaperSpotBroker(client, s.model_copy(update={"data_dir": out, "paper_tmn": s.engine_capital_tmn,
                                                             "paper_usdt": 0.0}))
     journal = Journal(out, echo=True)
-    engine = Engine(s, LiveFeed(client, s), SpotExec(spot), make_decider(s, s.engine_decider), journal,
+    fee = PAPER_FEE if mode != "live" else s.maker_fee
+    engine = Engine(s, LiveFeed(client, s), SpotExec(spot, fee), make_decider(s, s.engine_decider), journal,
                     state_path=out / "state.json")
     await engine.reconcile()
     snapshot = {k: v for k, v in s.model_dump(mode="json").items() if k.startswith(("engine_", "llm_")) and k not in SECRET_FIELDS}

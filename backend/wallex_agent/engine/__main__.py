@@ -39,6 +39,10 @@ def main() -> None:
         end = datetime.fromisoformat(a.end.replace("Z", "+00:00")).timestamp() if a.end else None
         syms = [x.strip().upper() for x in a.symbols.split(",")] if a.symbols else None
         res = asyncio.run(run_backtest(s, a.days, end, kinds, syms, a.offline))
+        first = next(iter(res.values()))
+        print("\nreproduce exactly (the auto universe changes with 24h volume):\n  python -m wallex_agent.engine "
+              f"backtest --days {a.days:g} --end {first['window_end']} --symbols {','.join(first['symbols'])} "
+              f"--decider {a.decider}")
         for kind, m in res.items():
             print(f"\n=== {kind} === {m['dir']}")
             for k in ("net_return_pct", "max_drawdown_pct", "trades", "win_rate_pct", "profit_factor",

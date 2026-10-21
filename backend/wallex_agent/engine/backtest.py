@@ -33,8 +33,9 @@ def make_decider(s: Settings, kind: str, offline: bool = False):
         return RuleDecider(s.engine_min_score)
     from openai import AsyncOpenAI
     llm = AsyncOpenAI(base_url=s.llm_base_url, api_key=s.llm_api_key or "missing")
+    extra = json.loads(s.engine_llm_extra_body) if s.engine_llm_extra_body.strip() else None
     return AIDecider(llm, s.engine_llm_model or s.llm_model, ResponseCache(s.data_dir / "ai_cache.jsonl"),
-                     s.engine_fee_rate, offline=offline)
+                     s.engine_fee_rate, offline=offline, extra_body=extra)
 
 
 def counterfactual(feed: SimFeed, run_dir: Path, fee: float, horizon_s: int) -> dict:
@@ -73,12 +74,20 @@ async def run_backtest(s: Settings, days: float, end: float | None = None, kinds
     try:
         if not symbols:
             symbols = await LiveFeed(client, s).universe()
-        markets = await client.markets()
-        spreads = {}
-        for sym in symbols:
-            st = markets.get(sym, {}).get("stats", {})
-            bid, ask = safe_float(st.get("bidPrice")), safe_float(st.get("askPrice"))
-            spreads[sym] = max((ask - bid) / ((ask + bid) / 2), 0.0005) if bid and ask else 0.003
+        # Historical spreads don't exist, so a snapshot stands in for them. It is saved per window
+        # end and reused, otherwise reruns would silently use different spreads (and results).
+        spread_file = ROOT / "data" / "history" / f"spreads_{int(end)}.json"
+        spreads = json.loads(spread_file.read_text()) if spread_file.exists() else {}
+        missing = [sym for sym in symbols if sym not in spreads]
+        if missing:
+            markets = await client.markets()
+            for sym in missing:
+                st = markets.get(sym, {}).get("stats", {})
+                bid, ask = safe_float(st.get("bidPrice")), safe_float(st.get("askPrice"))
+                spreads[sym] = max((ask - bid) / ((ask + bid) / 2), 0.0005) if bid and ask else 0.003
+            spread_file.parent.mkdir(parents=True, exist_ok=True)
+            spread_file.write_text(json.dumps(spreads, indent=1))
+        spreads = {sym: spreads[sym] for sym in symbols}
         m1, h1 = await load_history(client, symbols, int(start), int(end), ROOT / "data" / "history",
                                     tf_minutes=s.engine_timeframe_min)
         try:
@@ -98,12 +107,13 @@ async def run_backtest(s: Settings, days: float, end: float | None = None, kinds
             for f in run_dir.iterdir():
                 f.unlink()
         feed = SimFeed({k: v for k, v in m1.items() if v}, h1, s.engine_timeframe_min, spreads, fng)
-        broker = SimExec(feed, s.engine_capital_tmn, s.engine_fee_rate)
+        broker = SimExec(feed, s.engine_capital_tmn, s.engine_fee_rate, maker_fee_rate=s.maker_fee)
         settings = s.model_copy(update={"engine_end_time": datetime.fromtimestamp(end, timezone.utc).isoformat()})
         decider = make_decider(settings, kind, offline)
         journal = Journal(run_dir)
         engine = Engine(settings, feed, broker, decider, journal)
         journal.log("start", start, mode="backtest", decider=kind, symbols=symbols, days=days,
+                    execution=s.engine_execution, taker_fee=s.engine_fee_rate, maker_fee=s.maker_fee,
                     window=[datetime.fromtimestamp(start, timezone.utc).isoformat(),
                             datetime.fromtimestamp(end, timezone.utc).isoformat()], spreads=spreads)
         t, step, bar = int(start), 60, s.engine_timeframe_min * 60
@@ -129,5 +139,6 @@ async def run_backtest(s: Settings, days: float, end: float | None = None, kinds
         m["buy_and_hold_pct"] = bh
         (run_dir / "metrics.json").write_text(json.dumps(m, indent=1, ensure_ascii=False))
         (run_dir / "report.md").write_text(render_markdown(f"Backtest {kind} - {days:g} days to {stamp} UTC", m))
-        results[kind] = {"dir": str(run_dir), **m}
+        results[kind] = {"dir": str(run_dir), "symbols": symbols,
+                         "window_end": datetime.fromtimestamp(end, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), **m}
     return results
