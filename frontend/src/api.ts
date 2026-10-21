@@ -16,7 +16,7 @@ export interface Action {
   summary: string;
   reason?: string | null;
   risk: Record<string, any>;
-  status: "pending" | "executed" | "rejected" | "failed";
+  status: "pending" | "executing" | "executed" | "rejected" | "failed" | "expired";
   result?: any;
 }
 

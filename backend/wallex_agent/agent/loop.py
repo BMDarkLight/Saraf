@@ -19,7 +19,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, AsyncIterator
 
-from openai import AsyncOpenAI
+from openai import APIConnectionError, APIStatusError, AsyncOpenAI
 from pydantic import ValidationError
 
 from ..brokers import BrokerError
@@ -323,6 +323,13 @@ class Agent:
                         assistant = ev["message"]
                     else:
                         yield ev
+            except APIConnectionError:
+                yield {"type": "error", "message": f"Cannot reach the LLM at {s.llm_base_url} — is the model server "
+                                                   "(LM Studio / Ollama / provider) running and LLM_BASE_URL correct?"}
+                break
+            except APIStatusError as e:
+                yield {"type": "error", "message": f"LLM error {e.status_code}: {e.message}"}
+                break
             except Exception as e:
                 yield {"type": "error", "message": f"LLM error: {e}"}
                 break

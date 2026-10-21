@@ -69,7 +69,8 @@ uv run --project backend python backend/scripts/mock_llm.py   # OpenAI-compatibl
 uv run --project backend python backend/scripts/chat.py "heatmap" "compare" --approve
 ```
 
-The mock picks the tool from keywords in the message (heatmap/compare/planner/alert/ticket/report/chart/long/depth);
+The mock picks the tool from keywords in the message (heatmap/compare/planner/alert/ticket/report/chart/long/depth;
+`slow` gives a long streamed reply for testing the Stop button);
 it's for testing the UI and the loop without loading the CPU.
 
 ## Trading modes
@@ -91,6 +92,7 @@ Paper state lives in `data/`; reset it with `POST /api/paper/reset`.
 
 ```bash
 cd backend
-uv run pytest            # agent loop, Gemma regressions, generative UI and alerts (fake LLM + live public data)
+uv run pytest            # 56 tests: paper brokers, risk guard, agent loop under failure, HTTP API,
+                         # Gemma regressions, generative UI, alerts (fake market + scripted LLM, no inference)
 uv run python scripts/smoke.py   # calls every tool against the live API
 ```

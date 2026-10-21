@@ -73,7 +73,8 @@ export function Markets({ selected, onSelect }: { selected: string; onSelect: (s
           const [base, qt] = splitSymbol(r.symbol);
           const ch = mode === "movers" ? r.change_pct! : r.change_24h;
           return (
-            <button key={r.symbol} className={`mkt-row ${selected === r.symbol ? "sel" : ""}`} onClick={() => onSelect(r.symbol)}>
+            <button key={r.symbol} className={`mkt-row ${selected === r.symbol ? "sel" : ""}`} onClick={() => onSelect(r.symbol)}
+              aria-label={`${base}/${qt} ${price(r.last)} ${pct(ch)}`}>
               <div>
                 <div className="mkt-sym ltr">{base}<small>/{qt}</small></div>
                 <div className="mkt-fa">{r.fa_name}</div>

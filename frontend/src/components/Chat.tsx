@@ -28,7 +28,9 @@ const SUGGESTIONS = [
   ["اسپات", "با ۱۰۰ تتر سولانا بخر"],
 ];
 
-const STATUS_FA: Record<string, string> = { pending: "در انتظار تأیید", executed: "اجرا شد", rejected: "رد شد", failed: "ناموفق" };
+const STATUS_FA: Record<string, string> = {
+  pending: "در انتظار تأیید", executing: "در حال اجرا", executed: "اجرا شد", rejected: "رد شد", failed: "ناموفق", expired: "منقضی شد",
+};
 
 function ConfirmCard({ action, onDecide, busy }: { action: Action; onDecide: (a: Action, ok: boolean) => void; busy: boolean }) {
   const r = action.risk ?? {};
@@ -51,7 +53,7 @@ function ConfirmCard({ action, onDecide, busy }: { action: Action; onDecide: (a:
           {r.risk_at_stop != null && (<><dt>ضرر تا حد ضرر</dt><dd className="down">{price(r.risk_at_stop)}</dd></>)}
         </dl>
         {r.warning && <div className="warn-line">⚠ {r.warning === "no stop loss set" ? "حد ضرر تعیین نشده" : r.warning}</div>}
-        {action.status === "failed" && <div className="err-box" style={{ margin: 0 }}>{action.result?.error}</div>}
+        {(action.status === "failed" || action.status === "expired") && <div className="err-box" style={{ margin: 0 }}>{action.result?.error}</div>}
       </div>
       {action.status === "pending" && (
         <div className="confirm-actions">
@@ -70,12 +72,14 @@ export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: 
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const session = useRef<string | null>(null);
+  const abort = useRef<AbortController | null>(null);
   const log = useRef<HTMLDivElement>(null);
 
   useEffect(() => { log.current?.scrollTo({ top: log.current.scrollHeight, behavior: "smooth" }); }, [msgs]);
 
   const patchLast = (fn: (m: Msg) => void) =>
     setMsgs((prev) => {
+      if (!prev.length || prev[prev.length - 1].role !== "assistant") return prev; // conversation was reset
       const next = prev.slice();
       const last = { ...next[next.length - 1] };
       last.parts = last.parts.slice();
@@ -100,12 +104,15 @@ export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: 
       });
     else if (e.type === "tool_call") {
       patchLast((m) => m.parts.push({ kind: "tool", id: e.id, name: e.name, args: e.args, status: "run" }));
-      if (e.args?.symbol) onSymbol(String(e.args.symbol).toUpperCase());
-    } else if (e.type === "tool_result")
+    } else if (e.type === "tool_result") {
       patchLast((m) => {
         const i = m.parts.findIndex((p) => p.kind === "tool" && p.id === e.id);
         if (i >= 0) m.parts[i] = { ...(m.parts[i] as any), status: e.ok ? "ok" : "err", result: e.result };
       });
+      // follow the market the agent actually looked at (validated by the tool, unlike the raw args)
+      const sym = e.ok && (e.result?.symbol ?? e.result?.ui?.symbol);
+      if (typeof sym === "string" && /^[A-Z0-9]+(USDT|TMN)$/.test(sym)) onSymbol(sym);
+    }
     else if (e.type === "confirm") patchLast((m) => m.parts.push({ kind: "confirm", action: e.action }));
     else if (e.type === "action_update") {
       setMsgs((prev) => prev.map((m) => ({
@@ -116,16 +123,24 @@ export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: 
   };
 
   const run = async (url: string, body: unknown, userText?: string) => {
+    const ctrl = new AbortController();
+    abort.current = ctrl;
     setBusy(true);
     setMsgs((prev) => [...prev, ...(userText ? [{ role: "user" as const, text: userText, parts: [] }] : []), { role: "assistant", parts: [] }]);
     try {
-      await streamSSE(url, body, handle);
+      await streamSSE(url, body, handle, ctrl.signal);
     } catch (err: any) {
-      patchLast((m) => m.parts.push({ kind: "error", text: err.message }));
+      if (ctrl.signal.aborted) patchLast((m) => m.parts.push({ kind: "text", text: "\n\n_(متوقف شد)_" }));
+      else patchLast((m) => m.parts.push({ kind: "error", text: err.message }));
     } finally {
-      setBusy(false);
+      if (abort.current === ctrl) {
+        abort.current = null;
+        setBusy(false);
+      }
     }
   };
+
+  const stop = () => abort.current?.abort();
 
   const send = (text: string) => {
     const t = text.trim();
@@ -146,6 +161,9 @@ export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: 
     setMsgs((prev) => prev.map((m, i) => (i === msgIndex ? { ...m, parts: [...m.parts, { kind: "confirm", action }] } : m)));
 
   const reset = () => {
+    abort.current?.abort();
+    abort.current = null;
+    setBusy(false);
     if (session.current) fetch(`/api/sessions/${session.current}/reset`, { method: "POST" });
     session.current = null;
     setMsgs([]);
@@ -222,11 +240,17 @@ export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: 
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }}
         />
-        <button className="send" disabled={busy || !input.trim()} onClick={() => send(input)} aria-label="ارسال">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" style={{ transform: "scaleX(-1)" }}>
-            <path d="M5 12h14M13 6l6 6-6 6" />
-          </svg>
-        </button>
+        {busy ? (
+          <button className="send stop" onClick={stop} aria-label="توقف">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2" /></svg>
+          </button>
+        ) : (
+          <button className="send" disabled={!input.trim()} onClick={() => send(input)} aria-label="ارسال">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" style={{ transform: "scaleX(-1)" }}>
+              <path d="M5 12h14M13 6l6 6-6 6" />
+            </svg>
+          </button>
+        )}
       </div>
     </div>
   );

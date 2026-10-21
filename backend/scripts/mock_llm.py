@@ -66,7 +66,11 @@ async def completions(req: Request):
 
     def gen():
         yield sse(chunk({"role": "assistant", "reasoning_content": "بررسی درخواست کاربر و انتخاب ابزار مناسب… "}))
-        if after_tools or notice:
+        if "slow" in user_text.lower() and not (after_tools or notice):  # long reply, to test the Stop button
+            for i in range(80):
+                yield sse(chunk({"content": f"کلمه{i} "}))
+                time.sleep(0.25)
+        elif after_tools or notice:
             text = ("نتیجه اقدام ثبت شد. ✅" if notice else
                     "نتیجه را در کامپوننت بالا می‌بینید. **خلاصه:** داده‌ها از والکس به‌صورت زنده گرفته شد.")
             for w in text.split(" "):

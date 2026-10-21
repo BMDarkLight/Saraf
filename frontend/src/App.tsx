@@ -42,8 +42,14 @@ export default function App() {
         <span className="spacer" />
         {cfg && (
           <>
-            <span className={`chip ${cfg.spot_mode === "live" ? "live" : ""}`}><span className="dot" />اسپات: {cfg.spot_mode === "live" ? "واقعی" : "آزمایشی"}</span>
-            <span className={`chip ${cfg.futures_mode === "live" ? "live" : ""}`}><span className="dot" />فیوچرز: {cfg.futures_mode === "live" ? "واقعی" : "آزمایشی"}</span>
+            <span className={`chip hide-xs ${cfg.spot_mode === "live" ? "live" : ""}`}><span className="dot" />اسپات: {cfg.spot_mode === "live" ? "واقعی" : "آزمایشی"}</span>
+            <span className={`chip hide-xs ${cfg.futures_mode === "live" ? "live" : ""}`}><span className="dot" />فیوچرز: {cfg.futures_mode === "live" ? "واقعی" : "آزمایشی"}</span>
+            <span className={`chip show-xs ${cfg.spot_mode === "live" || cfg.futures_mode === "live" ? "live" : ""}`}>
+              <span className="dot" />
+              {cfg.spot_mode === cfg.futures_mode
+                ? (cfg.spot_mode === "live" ? "معامله واقعی" : "آزمایشی")
+                : `اسپات ${cfg.spot_mode === "live" ? "واقعی" : "آزمایشی"} · فیوچرز ${cfg.futures_mode === "live" ? "واقعی" : "آزمایشی"}`}
+            </span>
             <span className="chip hide-sm ltr">{cfg.model}</span>
           </>
         )}

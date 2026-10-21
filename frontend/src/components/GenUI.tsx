@@ -80,7 +80,7 @@ function Heatmap({ ui, onAsk }: { ui: any; onAsk: (t: string) => void }) {
           const a = Math.min(Math.abs(t.change) / 8, 1) * 0.85 + 0.15;
           const bg = t.change >= 0 ? `rgba(3,152,116,${a})` : `rgba(246,85,85,${a})`;
           return (
-            <button key={t.symbol} className="heat-tile" style={{ flexGrow: w, flexBasis: `${w * 52}px`, background: bg }}
+            <button key={t.symbol} className={`heat-tile ${a < 0.5 ? "pale" : ""}`} style={{ flexGrow: w, flexBasis: `${w * 52}px`, background: bg }}
               title={`${t.name} · ${price(t.last)}`} onClick={() => onAsk(`بازار ${t.symbol} رو تحلیل کن`)}>
               <b className="ltr">{t.symbol.replace(/(USDT|TMN)$/, "")}</b>
               <span className="num">{pct(t.change, 1)}</span>
@@ -184,7 +184,10 @@ function PositionPlanner({ ui, onSubmitTicket }: { ui: any; onSubmitTicket: (bod
   const pnlSl = (sl - e) * qty * sign;
   const rr = pnlSl ? Math.abs(pnlTp / pnlSl) : 0;
   const slBeyondLiq = (sl - liq) * sign <= 0;
-  const range = useMemo(() => ({ lo: e - 8 * ui.atr, hi: e + 8 * ui.atr, step: ui.atr / 20 }), [e, ui.atr]);
+  const range = useMemo(() => {
+    const atr = ui.atr > 0 ? ui.atr : e * 0.01;
+    return { lo: Math.max(e - 8 * atr, e * 0.01), hi: e + 8 * atr, step: atr / 20 };
+  }, [e, ui.atr]);
   const Slider = ({ label, v, set, color }: any) => (
     <label className="span2"><span className="lbl">{label} <b className="num" style={{ color }}>{price(v)}</b> <span className="muted num">({pct((100 * (v - e)) / e)})</span></span>
       <input type="range" min={range.lo} max={range.hi} step={range.step} value={v} onChange={(x) => set(Number(x.target.value))} />
@@ -273,7 +276,8 @@ export function GenUI({ ui, onAsk, onAction, sessionId }: {
 }) {
   const submitTicket = async (body: any): Promise<string | null> => {
     const r = await fetch("/api/ui/ticket", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, session_id: sessionId() }) });
-    const out = await r.json();
+    const out = await r.json().catch(() => ({}));
+    if (!r.ok) return typeof out.detail === "string" ? out.detail : "ورودی نامعتبر است";
     if (!out.ok) return out.result?.error ?? "خطا";
     if (out.action) onAction(out.action);
     return null;

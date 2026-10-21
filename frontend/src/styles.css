@@ -334,3 +334,21 @@ details.thinking div { white-space: pre-wrap; border-inline-start: 2px solid var
 @media (max-width: 820px) { .toasts { bottom: 64px; left: 16px; right: 16px; max-width: none; } }
 input[type="range"] { direction: ltr; }
 .ticket-grid .lbl { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+
+.send.stop { background: var(--text); color: var(--surface); }
+/* numeric cells ("+3.4%", "83,250") keep their own direction inside RTL tables */
+.md td, .md th { unicode-bidi: plaintext; }
+.err-box { unicode-bidi: plaintext; text-align: start; }
+
+/* narrow phones: one combined mode chip, and the bar clips instead of widening the page */
+.appbar { overflow: hidden; }
+.appbar .chip { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.show-xs { display: none !important; }
+@media (max-width: 560px) {
+  .appbar { gap: 10px; padding: 0 16px; }
+  .hide-xs { display: none !important; }
+  .show-xs { display: inline-flex !important; }
+  .brand small { display: none; }
+}
+.heat-tile.pale { color: var(--text); text-shadow: none; }  /* readable on faint tiles in light theme */
+.plan-stats span, .stat-grid span, .kv dt { unicode-bidi: plaintext; }  /* Persian labels with Latin (e.g. "ضرر در SL") inside LTR numeric boxes */
