@@ -141,15 +141,27 @@ async def movers(hours: int = 4, quote: str = "USDT", direction: str = "gainers"
     return await guarded(analytics.top_movers(ctx.client, hours, quote, limit, direction))
 
 
+async def known_symbol(symbol: str) -> str:
+    sym = symbol.upper()
+    if sym not in await guarded(ctx.client.markets()):
+        raise HTTPException(404, f"unknown market {sym}")
+    return sym
+
+
 @app.get("/api/depth/{symbol}")
 async def depth(symbol: str, levels: int = 12):
-    return await guarded(analytics.order_book_analysis(ctx.client, symbol, levels))
+    sym = await known_symbol(symbol)
+    return await guarded(analytics.order_book_analysis(ctx.client, sym, max(1, min(levels, 50))))
 
 
 @app.get("/api/candles/{symbol}")
 async def candles(symbol: str, resolution: str = "60", bars: int = 150):
+    if resolution not in analytics.RES_SECONDS:
+        raise HTTPException(400, f"resolution must be one of {sorted(analytics.RES_SECONDS)}")
+    sym = await known_symbol(symbol)
+    bars = max(1, min(bars, 1000))
     now = int(time.time())
-    return await guarded(ctx.client.candles(symbol, resolution, now - analytics.RES_SECONDS.get(resolution, 3600) * bars, now))
+    return await guarded(ctx.client.candles(sym, resolution, now - analytics.RES_SECONDS[resolution] * bars, now))
 
 
 @app.get("/api/sentiment")
@@ -240,7 +252,11 @@ if DIST.exists():
 
     @app.get("/{path:path}")
     async def spa(path: str):
-        f = DIST / path
+        if path.startswith("api/"):
+            raise HTTPException(404, "not found")
+        f = (DIST / path).resolve()
+        if not f.is_relative_to(DIST.resolve()):
+            raise HTTPException(404, "not found")
         return FileResponse(f if path and f.is_file() else DIST / "index.html")
 
 

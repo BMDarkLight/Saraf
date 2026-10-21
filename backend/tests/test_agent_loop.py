@@ -10,7 +10,7 @@ import pytest
 
 from wallex_agent.agent.context import AppContext
 from wallex_agent.agent.loop import Agent
-from wallex_agent.config import Settings
+from conftest import make_settings
 
 
 def chunk(content=None, tool_calls=None):
@@ -50,8 +50,7 @@ class FakeLLM:
 
 @pytest.fixture
 def agent(tmp_path):
-    s = Settings(llm_api_key="test", data_dir=tmp_path, llm_compat_schemas=False)
-    return Agent(AppContext.build(s))
+    return Agent(AppContext.build(make_settings(tmp_path, llm_compat_schemas=False)))
 
 
 async def collect(gen):

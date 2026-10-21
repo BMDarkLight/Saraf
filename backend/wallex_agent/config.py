@@ -21,6 +21,8 @@ class Settings(BaseSettings):
     # tool history sent as plain text instead of role:tool messages
     llm_compat_schemas: bool = False
     agent_max_steps: int = 12
+    # Conversation history sent to the LLM (chars); older turns are dropped. Lower it for small local models.
+    agent_history_chars: int = 60_000
 
     # Wallex
     wallex_base_url: str = "https://api.wallex.ir"

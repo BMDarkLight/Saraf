@@ -121,16 +121,23 @@ class PaperSpotBroker(SpotBroker):
     def _free(self, asset: str) -> float:
         return self._bal(asset) - float(self.state.data["locked"].get(asset, 0.0))
 
-    async def _walk_book(self, symbol: str, side: str, qty: float, limit: float | None) -> tuple[float, float]:
-        """Fill `qty` against the live book. Returns (filled_qty, avg_price)."""
+    async def _walk_book(self, symbol: str, side: str, qty: float, limit: float | None,
+                         budget: float | None = None) -> tuple[float, float]:
+        """Fill `qty` against the live book, spending at most `budget` quote (BUY).
+        Returns (filled_qty, avg_price)."""
         book = await self.client.depth(symbol)
-        levels = book["ask"] if side == "BUY" else book["bid"]
+        levels = sorted(book["ask"] if side == "BUY" else book["bid"],
+                        key=lambda lv: float(lv["price"]), reverse=side == "SELL")
         filled, cost = 0.0, 0.0
         for lv in levels:
             p, q = float(lv["price"]), float(lv["quantity"])
             if limit is not None and ((side == "BUY" and p > limit) or (side == "SELL" and p < limit)):
                 break
             take = min(q, qty - filled)
+            if budget is not None:
+                take = min(take, (budget - cost) / p)
+                if take <= 1e-12:
+                    break
             filled += take
             cost += take * p
             if filled >= qty - 1e-12:
@@ -219,7 +226,14 @@ class PaperSpotBroker(SpotBroker):
         }
         self.state.data["orders"][oid] = order
 
-        filled, avg = await self._walk_book(symbol, side, qty, price if type == "LIMIT" else None)
+        # BUY never spends more than the free quote balance (or quote_amount, when given)
+        budget = None
+        if side == "BUY":
+            budget = self._free(info["quote"])
+            if quote_amount is not None and quantity is None:
+                budget = min(budget, quote_amount)
+        filled, avg = await self._walk_book(symbol, side, qty, price if type == "LIMIT" else None, budget)
+        filled = round_down(filled, info["qty_decimals"]) if filled else 0.0
         if filled:
             self._settle(order, filled, avg)
         remaining = qty - filled

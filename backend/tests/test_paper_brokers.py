@@ -1,0 +1,182 @@
+"""Deterministic tests of the paper spot/futures simulators (no network)."""
+
+import pytest
+
+from wallex_agent.brokers import BrokerError
+from wallex_agent.brokers.futures import TAKER_FEE, liquidation_price
+
+
+# ===================================================================== spot
+async def test_market_buy_spends_quote_and_charges_fee(ctx):
+    o = await ctx.spot.place_order("BTCUSDT", "BUY", "MARKET", quote_amount=50)
+    b = await ctx.spot.balances()
+    assert o["status"] == "FILLED"
+    assert b["USDT"]["total"] == pytest.approx(1000 - o["executedSum"])
+    assert 49.5 < o["executedSum"] <= 50.0001
+    assert b["BTC"]["total"] == pytest.approx(o["executedQty"] * 0.998)
+
+
+async def test_market_buy_never_overdraws_on_thin_expensive_book(ctx, fake):
+    # top level is tiny; the rest of the book is 50% higher: walking it must not push USDT negative
+    fake.books["BTCUSDT"] = {"ask": [{"price": 100.1, "quantity": 0.01}, {"price": 150, "quantity": 100}],
+                             "bid": [{"price": 99.9, "quantity": 100}]}
+    await ctx.spot.place_order("BTCUSDT", "BUY", "MARKET", quote_amount=990)
+    b = await ctx.spot.balances()
+    assert b["USDT"]["total"] >= -1e-9
+
+
+async def test_insufficient_balance_and_min_notional_and_unknown_market(ctx):
+    with pytest.raises(BrokerError, match="insufficient"):
+        await ctx.spot.place_order("BTCUSDT", "BUY", "MARKET", quote_amount=5000)
+    with pytest.raises(BrokerError, match="insufficient"):
+        await ctx.spot.place_order("BTCUSDT", "SELL", "MARKET", quantity=1)
+    with pytest.raises(BrokerError, match="min notional"):
+        await ctx.spot.place_order("BTCUSDT", "BUY", "MARKET", quote_amount=0.5)
+    with pytest.raises(BrokerError, match="unknown market"):
+        await ctx.spot.place_order("NOPEUSDT", "BUY", "MARKET", quote_amount=10)
+
+
+async def test_limit_buy_rests_locks_then_fills_when_price_drops(ctx, fake):
+    o = await ctx.spot.place_order("BTCUSDT", "BUY", "LIMIT", quantity=2, price=90)
+    assert o["status"] == "NEW"
+    b = await ctx.spot.balances()
+    assert b["USDT"]["locked"] == pytest.approx(180)
+    assert b["USDT"]["free"] == pytest.approx(820)
+    fake.set_price("BTCUSDT", 89)
+    b = await ctx.spot.balances()
+    assert b["USDT"]["locked"] == pytest.approx(0)
+    assert b["USDT"]["total"] == pytest.approx(820)
+    assert (await ctx.spot.get_order(o["clientOrderId"]))["status"] == "FILLED"
+
+
+async def test_cancel_releases_lock_exactly(ctx):
+    o = await ctx.spot.place_order("BTCUSDT", "BUY", "LIMIT", quantity=1, price=50)
+    await ctx.spot.cancel_order(o["clientOrderId"])
+    b = await ctx.spot.balances()
+    assert b["USDT"] == {"free": 1000, "locked": 0, "total": 1000}
+    assert await ctx.spot.open_orders() == []
+
+
+async def test_locked_funds_cannot_be_double_spent(ctx):
+    await ctx.spot.place_order("BTCUSDT", "BUY", "LIMIT", quantity=9, price=90)  # locks 810
+    with pytest.raises(BrokerError, match="insufficient"):
+        await ctx.spot.place_order("BTCUSDT", "BUY", "MARKET", quote_amount=300)
+
+
+async def test_limit_sell_rests_and_fills(ctx, fake):
+    await ctx.spot.place_order("BTCUSDT", "BUY", "MARKET", quote_amount=500)
+    btc = (await ctx.spot.balances())["BTC"]["free"]
+    o = await ctx.spot.place_order("BTCUSDT", "SELL", "LIMIT", quantity=btc, price=120)
+    assert (await ctx.spot.balances())["BTC"]["free"] == pytest.approx(0, abs=1e-6)
+    fake.set_price("BTCUSDT", 125)
+    await ctx.spot.balances()
+    assert (await ctx.spot.get_order(o["clientOrderId"]))["status"] == "FILLED"
+
+
+async def test_tmn_market_integer_price(ctx):
+    o = await ctx.spot.place_order("BTCTMN", "BUY", "LIMIT", quote_amount=1_000_000, price=29_000_000.7)
+    assert o["price"] == 29_000_000
+
+
+# ================================================================== futures
+async def test_long_lifecycle_pnl_and_fees(ctx, fake):
+    pos = await ctx.futures.open_position("BTCUSDT", "LONG", leverage=5, margin=100)
+    entry = pos["entry_price"]
+    acct = await ctx.futures.account()
+    fee = 500 * TAKER_FEE
+    assert acct["wallets"]["USDT"]["available"] == pytest.approx(1000 - 100 - fee)
+    fake.set_price("BTCUSDT", 110)
+    [p] = await ctx.futures.positions()
+    assert p["unrealized_pnl"] == pytest.approx((110 - entry) * p["quantity"])
+    ev = await ctx.futures.close_position(pos["id"])
+    assert ev["realized_pnl"] > 40
+    assert (await ctx.futures.positions()) == []
+
+
+async def test_short_profits_when_price_falls(ctx, fake):
+    pos = await ctx.futures.open_position("BTCUSDT", "SHORT", leverage=2, margin=100)
+    fake.set_price("BTCUSDT", 90)
+    [p] = await ctx.futures.positions()
+    assert p["unrealized_pnl"] > 0 and p["roe_percent"] > 0
+
+
+async def test_take_profit_and_stop_loss_trigger_on_tick(ctx, fake):
+    a = await ctx.futures.open_position("BTCUSDT", "LONG", 3, margin=50, take_profit=105, stop_loss=95)
+    b = await ctx.futures.open_position("ETHUSDT", "SHORT", 3, margin=50, take_profit=9, stop_loss=11)
+    fake.set_price("BTCUSDT", 106)
+    fake.set_price("ETHUSDT", 11.5)
+    events = await ctx.futures.tick()
+    reasons = {e["position_id"]: e["reason"] for e in events}
+    assert reasons == {a["id"]: "TAKE_PROFIT", b["id"]: "STOP_LOSS"}
+
+
+async def test_liquidation_loses_exactly_the_margin(ctx, fake):
+    await ctx.futures.open_position("BTCUSDT", "LONG", 10, margin=100)
+    before = (await ctx.futures.account())["wallets"]["USDT"]["available"]
+    fake.set_price("BTCUSDT", 80)
+    [ev] = await ctx.futures.tick()
+    assert ev["reason"] == "LIQUIDATION" and ev["realized_pnl"] == pytest.approx(-100)
+    after = (await ctx.futures.account())["wallets"]["USDT"]["available"]
+    assert after == pytest.approx(before)
+
+
+async def test_partial_close_scales_quantity_and_margin(ctx):
+    pos = await ctx.futures.open_position("BTCUSDT", "LONG", 4, margin=100)
+    await ctx.futures.close_position(pos["id"], 0.25)
+    [p] = await ctx.futures.positions()
+    assert p["quantity"] == pytest.approx(pos["quantity"] * 0.75)
+    assert p["margin"] == pytest.approx(75)
+
+
+async def test_limit_order_reserves_fills_and_cancel_refunds(ctx, fake):
+    o = await ctx.futures.open_position("BTCUSDT", "LONG", 5, margin=100, order_type="LIMIT", price=95)
+    assert (await ctx.futures.account())["wallets"]["USDT"]["available"] == pytest.approx(1000 - o["reserved"])
+    o2 = await ctx.futures.open_position("BTCUSDT", "LONG", 5, margin=50, order_type="LIMIT", price=50)
+    await ctx.futures.cancel_order(o2["id"])
+    fake.set_price("BTCUSDT", 94)
+    [ev] = await ctx.futures.tick()
+    assert ev["type"] == "LIMIT_FILLED"
+    [p] = await ctx.futures.positions()
+    assert p["entry_price"] == 95
+    assert (await ctx.futures.account())["wallets"]["USDT"]["available"] == pytest.approx(1000 - 100 - 500 * TAKER_FEE)
+
+
+async def test_rejects_non_leverage_market_and_excess_leverage(ctx):
+    with pytest.raises(BrokerError, match="not a leverage-enabled"):
+        await ctx.futures.open_position("XYZUSDT", "LONG", 2, margin=10)
+    with pytest.raises(BrokerError, match="leverage must be between"):
+        await ctx.futures.open_position("ETHUSDT", "LONG", 8, margin=10)  # ETH max is 5x
+
+
+async def test_set_tp_sl_rejects_values_that_would_fire_immediately(ctx):
+    pos = await ctx.futures.open_position("BTCUSDT", "LONG", 5, margin=100)
+    with pytest.raises(BrokerError):
+        await ctx.futures.set_tp_sl(pos["id"], take_profit=90, stop_loss=None)   # TP below price on a long
+    with pytest.raises(BrokerError):
+        await ctx.futures.set_tp_sl(pos["id"], take_profit=None, stop_loss=101)  # SL above price on a long
+    liq = liquidation_price("LONG", pos["entry_price"], 5)
+    with pytest.raises(BrokerError):
+        await ctx.futures.set_tp_sl(pos["id"], take_profit=None, stop_loss=liq - 1)
+    p = await ctx.futures.set_tp_sl(pos["id"], take_profit=120, stop_loss=95)
+    assert (p["take_profit"], p["stop_loss"]) == (120, 95)
+    assert await ctx.futures.tick() == []
+
+
+async def test_max_open_positions_counts_pending_limit_orders(tmp_path, fake):
+    from conftest import make_ctx, make_settings
+    c = make_ctx(make_settings(tmp_path, max_open_positions=2), fake)
+    await c.futures.open_position("BTCUSDT", "LONG", 2, margin=10)
+    await c.futures.open_position("BTCUSDT", "LONG", 2, margin=10, order_type="LIMIT", price=50)
+    with pytest.raises(BrokerError, match="max open positions"):
+        await c.futures.open_position("ETHUSDT", "LONG", 2, margin=10)
+
+
+async def test_state_survives_restart(tmp_path, fake):
+    from conftest import make_ctx, make_settings
+    s = make_settings(tmp_path)
+    c1 = make_ctx(s, fake)
+    await c1.spot.place_order("BTCUSDT", "BUY", "MARKET", quote_amount=100)
+    await c1.futures.open_position("BTCUSDT", "SHORT", 2, margin=20)
+    c2 = make_ctx(s, fake)
+    assert (await c2.spot.balances())["BTC"]["total"] > 0
+    assert len(await c2.futures.positions()) == 1

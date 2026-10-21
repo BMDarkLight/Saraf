@@ -170,8 +170,9 @@ class PaperFuturesBroker(FuturesBroker):
         else:
             raise BrokerError("side must be LONG or SHORT")
         await self._validate(symbol, leverage)
-        if len(self.state.data["positions"]) >= self.settings.max_open_positions:
-            raise BrokerError(f"max open positions ({self.settings.max_open_positions}) reached")
+        open_count = len(self.state.data["positions"]) + len(self.state.data["orders"])
+        if open_count >= self.settings.max_open_positions:
+            raise BrokerError(f"max open positions ({self.settings.max_open_positions}, incl. pending orders) reached")
         q = await self.info.quote(symbol)
         entry = (q["ask"] if side == "LONG" else q["bid"]) if order_type == "MARKET" else price
         if not entry:
@@ -215,10 +216,27 @@ class PaperFuturesBroker(FuturesBroker):
         self.state.save()
         return ev
 
-    async def set_tp_sl(self, position_id: str, take_profit, stop_loss) -> dict:
+    async def validate_tp_sl(self, position_id: str, take_profit, stop_loss) -> dict:
+        """Reject TP/SL values that would fire on the next tick or sit beyond liquidation."""
         p = self.state.data["positions"].get(position_id)
         if not p:
             raise BrokerError(f"position {position_id} not found")
+        mark = (await self.info.quote(p["symbol"]))["mark"]
+        sign = 1 if p["side"] == "LONG" else -1
+        if take_profit and (take_profit - mark) * sign <= 0:
+            raise BrokerError(f"take_profit {take_profit:g} must be {'above' if sign > 0 else 'below'} "
+                              f"the current price {mark:.6g} for a {p['side']}")
+        if stop_loss:
+            if (stop_loss - mark) * sign >= 0:
+                raise BrokerError(f"stop_loss {stop_loss:g} must be {'below' if sign > 0 else 'above'} "
+                                  f"the current price {mark:.6g} for a {p['side']}")
+            if (stop_loss - p["liquidation_price"]) * sign <= 0:
+                raise BrokerError(f"stop_loss {stop_loss:g} is beyond the liquidation price "
+                                  f"{p['liquidation_price']:.6g}")
+        return p
+
+    async def set_tp_sl(self, position_id: str, take_profit, stop_loss) -> dict:
+        p = await self.validate_tp_sl(position_id, take_profit, stop_loss)
         if take_profit is not None:
             p["take_profit"] = take_profit or None
         if stop_loss is not None:

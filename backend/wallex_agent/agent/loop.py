@@ -30,6 +30,8 @@ from .prompts import system_prompt
 from .tools import TOOLS, openai_tools
 
 MAX_TOOL_RESULT_CHARS = 12_000
+TOOL_TIMEOUT = 45.0          # seconds; a stuck network call must not freeze the whole turn
+ACTION_TTL = 600.0           # seconds a trade confirmation stays approvable
 
 
 @dataclass
@@ -42,7 +44,7 @@ class PendingAction:
     reason: str | None
     risk: dict
     created_at: float = field(default_factory=time.time)
-    status: str = "pending"  # pending | executed | rejected | failed
+    status: str = "pending"  # pending | executing | executed | rejected | failed | expired
     result: Any = None
 
     def public(self) -> dict:
@@ -117,6 +119,40 @@ def for_model(result: Any) -> Any:
     return result
 
 
+def repair_history(messages: list[dict]) -> None:
+    """Make history valid for strict providers, in place: every assistant tool call gets a tool
+    result (a turn interrupted by a dropped connection leaves them dangling) and orphan tool
+    results are dropped."""
+    out: list[dict] = []
+    pending: list[str] = []
+    for m in messages:
+        if m["role"] == "tool":
+            if m.get("tool_call_id") in pending:
+                pending.remove(m["tool_call_id"])
+                out.append(m)
+            continue
+        out.extend({"role": "tool", "tool_call_id": cid, "content": '{"error": "interrupted before completion"}'}
+                   for cid in pending)
+        pending = [c["id"] for c in m.get("tool_calls") or []] if m["role"] == "assistant" else []
+        out.append(m)
+    out.extend({"role": "tool", "tool_call_id": cid, "content": '{"error": "interrupted before completion"}'}
+               for cid in pending)
+    messages[:] = out
+
+
+def trim_history(messages: list[dict], budget_chars: int) -> list[dict]:
+    """Keep the most recent messages within a character budget, cutting only at user turns so
+    tool calls and their results stay together. The latest user turn is always kept."""
+    size, cut = 0, len(messages)
+    for i in range(len(messages) - 1, -1, -1):
+        size += len(json.dumps(messages[i], ensure_ascii=False))
+        if messages[i]["role"] == "user":
+            if size > budget_chars and cut < len(messages):
+                break
+            cut = i
+    return messages[cut:]
+
+
 def _truncate(payload: Any) -> str:
     s = json.dumps(payload, default=str, ensure_ascii=False)
     if len(s) > MAX_TOOL_RESULT_CHARS:
@@ -151,23 +187,30 @@ class Agent:
 
         if t.mutating:
             try:
-                facts = await risk.check(self.ctx, name, args)
+                facts = await asyncio.wait_for(risk.check(self.ctx, name, args), TOOL_TIMEOUT)
             except risk.RiskViolation as e:
                 return False, {"error": f"blocked by risk guard: {e}"}, None
             except (BrokerError, WallexError) as e:
                 return False, {"error": str(e)}, None
+            except asyncio.TimeoutError:
+                return False, {"error": f"risk check timed out after {TOOL_TIMEOUT:g}s"}, None
             if self.ctx.settings.require_confirmation:
+                try:
+                    summary = t.summarize(args) if t.summarize else name
+                except Exception:
+                    summary = f"{name} {args.model_dump(exclude_none=True)}"
                 action = PendingAction(
                     id=uuid.uuid4().hex[:12], session_id=session.id, tool=name, args=args.model_dump(),
-                    summary=t.summarize(args) if t.summarize else name, reason=getattr(args, "reason", None),
-                    risk=_jsonable(facts),
+                    summary=summary, reason=getattr(args, "reason", None), risk=_jsonable(facts),
                 )
                 self.pending[action.id] = action
                 return True, {"status": "awaiting_user_confirmation", "action_id": action.id,
                               "summary": action.summary, "risk": action.risk}, action.public()
         try:
-            result = await t.handler(self.ctx, args)
+            result = await asyncio.wait_for(t.handler(self.ctx, args), TOOL_TIMEOUT)
             return True, _jsonable(result), None
+        except asyncio.TimeoutError:
+            return False, {"error": f"{name} timed out after {TOOL_TIMEOUT:g}s; try again or use another tool"}, None
         except (BrokerError, WallexError) as e:
             return False, {"error": str(e)}, None
         except Exception as e:  # tool bugs shouldn't kill the conversation
@@ -178,16 +221,26 @@ class Agent:
         if not action:
             raise KeyError(action_id)
         if action.status != "pending":
-            return action
+            return action  # already decided (also stops double-clicks executing twice)
         if not approve:
             action.status = "rejected"
             return action
+        if time.time() - action.created_at > ACTION_TTL:
+            action.status = "expired"
+            action.result = {"error": f"confirmation expired after {ACTION_TTL / 60:g} minutes; prices may have moved"}
+            return action
+        action.status = "executing"  # claimed synchronously, before any await
         t = TOOLS[action.tool]
         try:
-            action.result = _jsonable(await t.handler(self.ctx, t.args.model_validate(action.args)))
+            args = t.args.model_validate(action.args)
+            await risk.check(self.ctx, action.tool, args)  # the market may have moved since the proposal
+            action.result = _jsonable(await asyncio.wait_for(t.handler(self.ctx, args), TOOL_TIMEOUT))
             action.status = "executed"
+        except risk.RiskViolation as e:
+            action.result = {"error": f"blocked by risk guard at execution: {e}"}
+            action.status = "failed"
         except Exception as e:
-            action.result = {"error": str(e)}
+            action.result = {"error": str(e) or type(e).__name__}
             action.status = "failed"
         return action
 
@@ -225,7 +278,11 @@ class Agent:
                 content.append(d.content)
                 yield {"type": "text", "delta": d.content}
             for tc in d.tool_calls or []:
-                c = calls.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                key = tc.index
+                if key is None:  # some local servers omit the index; a new id means a new call
+                    key = len(calls) if (tc.id and all(c["id"] != tc.id for c in calls.values())) or not calls \
+                        else max(calls)
+                c = calls.setdefault(key, {"id": "", "name": "", "arguments": ""})
                 if tc.id:
                     c["id"] = tc.id
                 if tc.function and tc.function.name:
@@ -250,12 +307,15 @@ class Agent:
                 yield ev
 
     async def _run(self, session: Session) -> AsyncIterator[dict]:
-        if not self.ctx.settings.llm_api_key and "localhost" not in self.ctx.settings.llm_base_url:
+        s = self.ctx.settings
+        if not s.llm_api_key and "api.openai.com" in s.llm_base_url:
             yield {"type": "error", "message": "LLM_API_KEY is not set. Configure it in .env"}
             yield {"type": "done"}
             return
-        for _ in range(self.ctx.settings.agent_max_steps):
-            messages = [{"role": "system", "content": system_prompt(self.ctx.settings)}] + session.messages
+        repair_history(session.messages)
+        for _ in range(s.agent_max_steps):
+            history = trim_history(session.messages, s.agent_history_chars)
+            messages = [{"role": "system", "content": system_prompt(s)}] + history
             assistant = None
             try:
                 async for ev in self._complete(messages):
@@ -292,7 +352,8 @@ class Agent:
         session = self.session(action.session_id)
         async with session.lock:
             verdict = {"executed": "approved and executed", "failed": "approved but execution FAILED",
-                       "rejected": "REJECTED by the user (not executed)"}[action.status]
+                       "rejected": "REJECTED by the user (not executed)",
+                       "expired": "NOT executed because the confirmation expired"}.get(action.status, action.status)
             session.messages.append({"role": "user", "content":
                 f"[system notice] Action {action.id} ({action.summary}) was {verdict}. "
                 f"Result: {_truncate(action.result)}. Briefly confirm the outcome to the user."})

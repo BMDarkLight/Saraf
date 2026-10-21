@@ -8,12 +8,12 @@ import pytest
 from wallex_agent.agent.context import AppContext
 from wallex_agent.agent.loop import Agent, compat_history, for_model, parse_text_tool_calls
 from wallex_agent.agent.tools import TOOLS, openai_tools
-from wallex_agent.config import Settings
+from conftest import make_settings
 
 
 @pytest.fixture
 def agent(tmp_path):
-    return Agent(AppContext.build(Settings(llm_api_key="test", data_dir=tmp_path, llm_compat_schemas=True)))
+    return Agent(AppContext.build(make_settings(tmp_path, llm_compat_schemas=True)))
 
 
 async def run(agent, name, **args):
