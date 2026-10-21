@@ -151,7 +151,7 @@ class Engine:
         for p in list(self.positions.values()):
             p["bars_held"] = p.get("bars_held", 0) + 1
             await self._time_stop(p, now)
-        if self.positions and self.state["bars"] % self.REVIEW_EVERY_BARS == 0:
+        if self.positions and self.s.engine_ai_reviews != "off" and self.state["bars"] % self.REVIEW_EVERY_BARS == 0:
             await self._review_positions(now)
 
         cands = []
@@ -181,9 +181,15 @@ class Engine:
                 ctx["btc"] = r({k: f[k] for k in ("htf_trend", "htf_ret_24", "htf_rsi", "ret_16", "atr_pct")})
         ctx["portfolio"] = await self._portfolio_ctx()
         d = await self.decider.assess_regime(ctx)
-        self.state.update(regime=d.payload["regime"], regime_reason=d.payload["reasoning"], regime_at=now)
-        self.journal.log("regime", now, regime=d.payload["regime"], reason=d.payload["reasoning"], source=d.source,
-                         prompt_hash=d.prompt_hash, error=d.error, context=ctx)
+        regime, reason = d.payload["regime"], d.payload["reasoning"]
+        breadth = ctx.get("breadth_pct_up_24h")
+        if breadth is not None and breadth < self.s.engine_breadth_gate_pct and regime != "risk_off":
+            # hard rule: the decider may be stricter than the breadth gate, never looser
+            regime, reason = "risk_off", (f"breadth gate: only {breadth}% of markets up over 24h "
+                                          f"(< {self.s.engine_breadth_gate_pct:g}%); decider said {d.payload['regime']}")
+        self.state.update(regime=regime, regime_reason=reason, regime_at=now)
+        self.journal.log("regime", now, regime=regime, decider_regime=d.payload["regime"], reason=reason,
+                         source=d.source, prompt_hash=d.prompt_hash, error=d.error, context=ctx)
 
     async def _consider(self, cand: strategy.Candidate, f: dict, now: float) -> None:
         eq, cash, exposure = await self.equity()
@@ -290,7 +296,7 @@ class Engine:
             act = d.payload["action"]
             self.journal.log("review", now, symbol=p["symbol"], position_id=pid, action=act, source=d.source,
                              prompt_hash=d.prompt_hash, error=d.error, reason=d.payload["reasoning"])
-            if act == "EXIT":
+            if act == "EXIT" and self.s.engine_ai_reviews == "full":
                 await self._exit(pid, "ai_exit", now, note=d.payload["reasoning"])
             elif act == "TIGHTEN":
                 ns = d.payload.get("new_stop")

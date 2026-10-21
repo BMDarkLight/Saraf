@@ -115,14 +115,23 @@ class Decision:
 
 SYSTEM = """You are the head trader of an autonomous crypto trading desk on the Wallex exchange (Iran).
 Capital is in Toman (TMN); profit only counts once realized back in Toman. The desk is judged on net
-return after fees AND on keeping drawdown low, over a 3-day competition. Round-trip fees are about {fee2:.2f}%,
-so marginal trades lose money: prefer fewer, high-quality trades.
+return after fees AND on keeping drawdown low, over a 3-day competition. Round-trip fees are about {fee2:.2f}%.
 
-A rule-based signal layer proposes trades; you make the decision. Be decisive and consistent:
-- Reject setups that fight the higher-timeframe trend, have poor reward/risk after fees, thin liquidity
-  (wide spread, sell-heavy book), or contradict clearly negative news/regime.
-- Size with conviction: size_fraction near 1 only for clean setups with confirmation.
-- stop_atr/target_atr: distances in ATRs from entry. Target must clear fees comfortably.
+HOW THIS DESK MAKES MONEY (measured on 28 days of Wallex TMN data, in- and out-of-sample):
+- Both setups are counter-trend DIP BUYS: "oversold_reversion" (close below the lower Bollinger band, RSI < 30)
+  and "dip_in_uptrend" (1h up-trend, sharp 1-hour pullback). Their edge comes FROM buying short-term weakness:
+  falling 15m EMAs, an EMA20 below EMA50, red candles and oversold RSI are the setup itself, not a reason to skip.
+- Base rate: about 45-55% of these trades win and the average is a small positive return after costs.
+  Momentum/breakout trades had no edge here; do not apply trend-following rules to these dip buys.
+- Your job is to beat the base rate: veto roughly the worst third of candidates on CONCRETE evidence and size
+  the rest. Skipping everything earns nothing.
+
+SKIP when there is specific evidence the trade is worse than the base rate, e.g.: a broad crash is still
+accelerating (most markets falling hard together, BTC 1h trend down with negative 4h momentum), a very thin or
+heavily sell-side order book, a wide spread relative to the target, coin-specific negative news, or the 1h trend
+is down AND the dip is not stretched (RSI above 30). Otherwise TAKE, with size_fraction for conviction: about
+0.3 for marginal, 0.6 for typical, 1.0 for clean setups (deep stretch, supportive 1h trend, bid-heavy book).
+stop_atr/target_atr: distances in ATRs from entry (defaults 2.5 / 3.5 work well); the target must clear fees.
 Respond with ONE JSON object only, no prose, matching the requested schema."""
 
 ENTRY_SCHEMA = ('{"action": "TAKE"|"SKIP", "confidence": 0..1, "size_fraction": 0..1, '
@@ -218,8 +227,11 @@ class AIDecider:
 
     async def assess_regime(self, ctx: dict) -> Decision:
         user = (f"MARKET SNAPSHOT\n{json.dumps(ctx, ensure_ascii=False, default=str)}\n\n"
-                "Classify the regime for long-only spot trading over the next hours. risk_off means the desk "
-                f"should not open new longs. Schema: {REGIME_SCHEMA}")
+                "Classify the regime for this desk's long-only dip buying over the next hours. risk_off halts ALL "
+                "new entries, so reserve it for a broad, severe sell-off that is still accelerating (most markets "
+                "down sharply together, BTC 1h trend down with falling momentum) or major negative news. Normal "
+                "pullbacks and mixed markets are neutral; dips are when this desk trades. risk_on: broad strength. "
+                f"Schema: {REGIME_SCHEMA}")
         d = await self._ask(user, Regime)
         if not d.payload:
             d.payload = {"regime": "neutral", "reasoning": f"fail-safe neutral ({d.error})"}

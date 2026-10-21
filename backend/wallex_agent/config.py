@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     engine_min_score: float = 0.5                       # rule score needed to reach the decider
     engine_setups: str = "oversold_reversion,dip_in_uptrend"  # see strategy.ALL_SETUPS
     engine_max_ai_calls_per_bar: int = 4
+    # Hard breadth gate: no new entries while fewer than this % of TMN markets are up over 24h (dip
+    # buying into a broad sell-off was the biggest loss source in-sample). The AI can only be stricter.
+    engine_breadth_gate_pct: float = 25.0
+    # AI position reviews: "off" (exits follow the rules), "tighten" (AI may only raise stops), "full"
+    # (AI may also exit). In-sample, AI exits cut winners before their targets, so the default is off.
+    engine_ai_reviews: Literal["off", "tighten", "full"] = "off"
     engine_time_stop_bars: int = 32
     engine_cooldown_bars: int = 4
     engine_end_time: str = ""                           # ISO-8601 challenge end; flatten to TMN before it

@@ -46,6 +46,17 @@ uv run python -m wallex_agent.engine run --mode shadow                   # live 
 uv run python -m wallex_agent.engine run --mode live --confirm-live      # challenge account
 ```
 
+LLM used in the challenge: Qwen 3.6 through GapGPT (OpenAI-compatible). It is a thinking model, so it must be told
+to answer directly, otherwise its reasoning consumes the whole token budget and no decision comes back:
+
+```bash
+LLM_BASE_URL=https://api.gapgpt.app/v1
+LLM_MODEL=gapgpt-qwen-3.6
+ENGINE_LLM_EXTRA_BODY={"reasoning_effort": "none"}
+ENGINE_FEE_RATE=0.001          # the challenge account's real TMN fee (maker = taker = 0.1%)
+ENGINE_MAKER_FEE_RATE=0.001
+```
+
 ### Deploy (VPS)
 
 ```bash
