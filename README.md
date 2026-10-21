@@ -34,6 +34,29 @@ Open http://127.0.0.1:8000. For UI development: `cd frontend && npm run dev` (po
 Any OpenAI-compatible endpoint works (OpenAI, OpenRouter, Together, vLLM, Ollama: `LLM_BASE_URL=http://localhost:11434/v1`).
 If the provider doesn't support streaming tool calls: `LLM_STREAM=false`.
 
+## Autonomous trading engine (challenge)
+
+The algorithmic engine for the Wallex challenge lives in `backend/wallex_agent/engine/`; the full write-up
+(architecture, AI role, entry/exit rules, risk, research, results, reproduction) is in **[STRATEGY.md](STRATEGY.md)**.
+
+```bash
+cd backend
+uv run python -m wallex_agent.engine backtest --days 14 --decider both   # rules vs AI, with counterfactuals
+uv run python -m wallex_agent.engine run --mode shadow                   # live data, no real orders
+uv run python -m wallex_agent.engine run --mode live --confirm-live      # challenge account
+```
+
+### Deploy (VPS)
+
+```bash
+git clone <repo> && cd wallex-agent && cp .env.example .env   # fill LLM_*, WALLEX_API_KEY, ENGINE_*
+docker compose build --build-arg GIT_COMMIT=$(git rev-parse --short HEAD)
+docker compose up -d && docker compose logs -f engine         # shadow mode by default
+```
+
+The engine resumes from `data/engine/<mode>/state.json` after a restart and reconciles positions with the
+exchange balances. Lock the Wallex API key to the server's IP and give it trading permission only (no withdrawal).
+
 ## Generative UI
 
 The agent builds UI components itself, inside the conversation (`frontend/src/components/GenUI.tsx`):

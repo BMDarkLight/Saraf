@@ -16,6 +16,14 @@ class BrokerError(Exception):
     pass
 
 
+def safe_float(x) -> float:
+    """Wallex returns "-" instead of a number for inactive markets."""
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return 0.0
+
+
 def round_down(value: float, decimals: int) -> float:
     q = 10 ** max(decimals, 0)
     return math.floor(value * q + 1e-9) / q
@@ -41,9 +49,7 @@ class MarketInfo:
     async def quote(self, symbol: str) -> dict:
         m = await self.get(symbol)
         st = m.get("stats") or {}
-        bid = float(st.get("bidPrice") or 0)
-        ask = float(st.get("askPrice") or 0)
-        last = float(st.get("lastPrice") or 0)
+        bid, ask, last = (safe_float(st.get(k)) for k in ("bidPrice", "askPrice", "lastPrice"))
         mid = (bid + ask) / 2 if bid and ask else last
         return {"symbol": m["symbol"], "bid": bid, "ask": ask, "last": last, "mark": mid or last,
                 "base": m["baseAsset"], "quote": m["quoteAsset"],

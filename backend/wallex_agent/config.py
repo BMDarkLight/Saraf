@@ -46,6 +46,36 @@ class Settings(BaseSettings):
     paper_usdt: float = 1000.0
     paper_tmn: float = 100_000_000.0
 
+    # ---- Autonomous trading engine (hackathon challenge) ----
+    engine_mode: Literal["backtest", "shadow", "live"] = "shadow"
+    engine_decider: Literal["ai", "rules"] = "ai"       # "rules" = baseline without the LLM
+    engine_llm_model: str = ""                          # defaults to llm_model
+    engine_capital_tmn: float = 5_000_000               # challenge base capital (return is measured vs this)
+    engine_universe: str = "auto"                       # "auto" or comma-separated TMN symbols
+    engine_allowed_markets: str = ""                    # challenge's allowed list; empty = no restriction
+    engine_universe_size: int = 10
+    engine_max_spread_pct: float = 0.4
+    engine_timeframe_min: int = 15
+    engine_fee_rate: float = 0.0025                     # per side; check /v1/account/fee for the real rate
+    engine_max_positions: int = 3
+    engine_max_position_pct: float = 0.25               # of equity, per position
+    engine_max_exposure_pct: float = 0.75               # of equity, all positions
+    engine_risk_per_trade_pct: float = 0.01             # equity lost if the stop is hit
+    engine_drawdown_pause_pct: float = 0.06             # from peak: no new entries for a while
+    engine_drawdown_stop_pct: float = 0.12              # from peak: flatten everything, stop trading
+    engine_pause_hours: float = 12
+    engine_min_atr_pct: float = 0.35                    # skip markets too quiet to beat fees
+    engine_max_atr_pct: float = 4.0
+    engine_min_score: float = 0.5                       # rule score needed to reach the decider
+    engine_setups: str = "oversold_reversion,dip_in_uptrend"  # see strategy.ALL_SETUPS
+    engine_max_ai_calls_per_bar: int = 4
+    engine_time_stop_bars: int = 32
+    engine_cooldown_bars: int = 4
+    engine_end_time: str = ""                           # ISO-8601 challenge end; flatten to TMN before it
+    engine_no_entry_before_end_min: int = 240
+    engine_flatten_before_end_min: int = 45
+    engine_monitor_seconds: int = 15
+
     # News / web
     tavily_api_key: str = ""
 

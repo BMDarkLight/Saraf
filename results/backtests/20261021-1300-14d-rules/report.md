@@ -1,0 +1,90 @@
+# Backtest rules - 14 days to 20261021-1300 UTC
+
+| metric | value |
+|---|---|
+| initial_capital_tmn | 5000000.0 |
+| final_equity_tmn | 4951064 |
+| net_return_pct | -0.979 |
+| max_drawdown_pct | 3.599 |
+| sharpe_annualized | -1.61 |
+| trades | 25 |
+| win_rate_pct | 32.0 |
+| avg_trade_pnl_pct | -0.367 |
+| profit_factor | 0.82 |
+| traded_volume_tmn | 55549983 |
+| avg_trade_size_tmn | 1111978 |
+| decisions | 27 |
+| decisions_taken | 27 |
+| risk_blocks | 80 |
+| errors | 0 |
+| circuit_breakers | 0 |
+| fees_paid_tmn | 139049 |
+| llm_calls | 0 |
+
+**by_setup**
+
+```json
+{
+ "oversold_reversion": {
+  "trades": 14,
+  "avg_pnl_pct": -0.424
+ },
+ "dip_in_uptrend": {
+  "trades": 11,
+  "avg_pnl_pct": -0.293
+ }
+}
+```
+
+**exit_reasons**
+
+```json
+{
+ "stop_loss": 12,
+ "trailing_stop": 7,
+ "take_profit": 6
+}
+```
+
+**decision_sources**
+
+```json
+{
+ "rules": 27
+}
+```
+
+**counterfactual_by_action**
+
+```json
+{
+ "TAKE": {
+  "n": 27,
+  "avg_pnl_pct": -0.486,
+  "win_rate_pct": 40.7
+ },
+ "SKIP": {
+  "n": 0,
+  "avg_pnl_pct": null,
+  "win_rate_pct": null
+ }
+}
+```
+
+**buy_and_hold_pct**
+
+```json
+{
+ "PEPETMN": 12.56,
+ "XRPTMN": -6.49,
+ "ARBTMN": 3.82,
+ "PUMPTMN": -25.04,
+ "ETHTMN": -4.39,
+ "BNBTMN": -2.64,
+ "TRXTMN": -0.81,
+ "BTCTMN": -0.2,
+ "ADATMN": -10.91,
+ "DOGETMN": -7.9
+}
+```
+
