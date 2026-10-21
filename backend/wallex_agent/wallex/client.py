@@ -1,0 +1,240 @@
+"""Async client for the public Wallex REST API (https://api-docs.wallex.ir).
+
+Covers market data, account, spot orders and OTC (instant) trades. Every method
+returns the unwrapped `result` payload of Wallex's `{success, message, result}`
+envelope and raises `WallexError` on failure.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from typing import Any
+
+import httpx
+
+ORDER_ERROR_CODES = {
+    1001: "price precision not accepted",
+    1002: "quantity precision not accepted",
+    1003: "MARKET orders cannot have a price",
+    1004: "quantity below the minimum",
+    1005: "quantity or total is required",
+    1006: "insufficient balance",
+    1007: "stop price is required",
+    1008: "price is required",
+    1009: "stop price precision not accepted",
+    1010: "quantity and total must not both be set",
+    1011: "total precision not accepted",
+}
+
+CANDLE_RESOLUTIONS = {"1", "60", "180", "360", "720", "1D"}
+
+
+class WallexError(Exception):
+    def __init__(self, message: str, status: int | None = None, payload: Any = None):
+        super().__init__(message)
+        self.status = status
+        self.payload = payload
+
+
+class _TTLCache:
+    def __init__(self) -> None:
+        self._data: dict[str, tuple[float, Any]] = {}
+
+    def get(self, key: str) -> Any | None:
+        hit = self._data.get(key)
+        if hit and hit[0] > time.monotonic():
+            return hit[1]
+        return None
+
+    def set(self, key: str, value: Any, ttl: float) -> None:
+        self._data[key] = (time.monotonic() + ttl, value)
+
+
+class WallexClient:
+    def __init__(self, base_url: str = "https://api.wallex.ir", api_key: str = "", timeout: float = 15.0):
+        self.api_key = api_key
+        self._http = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=timeout,
+            headers={"User-Agent": "wallex-agent/0.1", "Accept": "application/json"},
+        )
+        self._cache = _TTLCache()
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
+
+    @property
+    def has_key(self) -> bool:
+        return bool(self.api_key)
+
+    # ------------------------------------------------------------------ core
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: dict | None = None,
+        json: dict | None = None,
+        auth: bool = False,
+        raw: bool = False,
+        retries: int = 2,
+    ) -> Any:
+        headers = {}
+        if auth:
+            if not self.api_key:
+                raise WallexError("WALLEX_API_KEY is not set; this endpoint requires an API key.")
+            headers["X-API-Key"] = self.api_key
+        params = {k: v for k, v in (params or {}).items() if v is not None}
+
+        for attempt in range(retries + 1):
+            try:
+                r = await self._http.request(method, path, params=params, json=json, headers=headers)
+            except httpx.TransportError as e:
+                if attempt < retries:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                raise WallexError(f"network error calling {path}: {e}") from e
+            if r.status_code in (429, 502, 503, 504) and attempt < retries:
+                await asyncio.sleep(0.7 * (attempt + 1))
+                continue
+            break
+
+        try:
+            body = r.json()
+        except ValueError:
+            raise WallexError(f"non-JSON response from {path} (HTTP {r.status_code})", r.status_code, r.text[:300])
+
+        if raw:
+            if r.status_code >= 400:
+                raise WallexError(f"HTTP {r.status_code} from {path}", r.status_code, body)
+            return body
+
+        if r.status_code >= 400 or (isinstance(body, dict) and body.get("success") is False):
+            msg = body.get("message") if isinstance(body, dict) else None
+            result = body.get("result") if isinstance(body, dict) else None
+            code = result.get("error_code") if isinstance(result, dict) else None
+            if code in ORDER_ERROR_CODES:
+                msg = f"{msg} (error_code {code}: {ORDER_ERROR_CODES[code]})"
+            raise WallexError(msg or f"HTTP {r.status_code} from {path}", r.status_code, body)
+        return body.get("result", body) if isinstance(body, dict) else body
+
+    async def _cached(self, key: str, ttl: float, coro_fn) -> Any:
+        hit = self._cache.get(key)
+        if hit is not None:
+            return hit
+        value = await coro_fn()
+        self._cache.set(key, value, ttl)
+        return value
+
+    # ----------------------------------------------------------- market data
+    async def markets(self) -> dict[str, dict]:
+        """All spot markets with 24h/7d stats, keyed by symbol."""
+        res = await self._cached("markets", 5, lambda: self._request("GET", "/v1/markets"))
+        return res["symbols"]
+
+    async def markets_detail(self) -> list[dict]:
+        """Richer market list used by the Wallex web app (leverage, precision, flags)."""
+        res = await self._cached("hector_markets", 30, lambda: self._request("GET", "/hector/web/v1/markets"))
+        return res["markets"]
+
+    async def currencies_stats(self, key: str) -> Any:
+        """Global stats for one coin (the endpoint now requires `key`, unlike the docs)."""
+        return await self._cached(f"currency:{key}", 60,
+                                  lambda: self._request("GET", "/v1/currencies/stats", params={"key": key.upper()}))
+
+    async def depth(self, symbol: str) -> dict:
+        return await self._request("GET", "/v1/depth", params={"symbol": symbol.upper()})
+
+    async def depth_all(self) -> dict:
+        return await self._request("GET", "/v2/depth/all")
+
+    async def trades(self, symbol: str) -> list[dict]:
+        res = await self._request("GET", "/v1/trades", params={"symbol": symbol.upper()})
+        return res["latestTrades"]
+
+    async def candles(self, symbol: str, resolution: str, start: int, end: int | None = None) -> list[dict]:
+        """OHLCV candles. resolution: 1 (min), 60, 180, 360, 720 or 1D."""
+        if resolution not in CANDLE_RESOLUTIONS:
+            raise WallexError(f"resolution must be one of {sorted(CANDLE_RESOLUTIONS)}")
+        end = end or int(time.time())
+        body = await self._request(
+            "GET",
+            "/v1/udf/history",
+            params={"symbol": symbol.upper(), "resolution": resolution, "from": start, "to": end},
+            raw=True,
+        )
+        if body.get("s") != "ok":
+            return []
+        return [
+            {"t": t, "o": float(o), "h": float(h), "l": float(l), "c": float(c), "v": float(v)}
+            for t, o, h, l, c, v in zip(body["t"], body["o"], body["h"], body["l"], body["c"], body["v"])
+        ]
+
+    # -------------------------------------------------------------- account
+    async def profile(self) -> dict:
+        return await self._request("GET", "/v1/account/profile", auth=True)
+
+    async def fees(self) -> dict:
+        return await self._request("GET", "/v1/account/fee", auth=True)
+
+    async def balances(self) -> dict[str, dict]:
+        res = await self._request("GET", "/v1/account/balances", auth=True)
+        return res["balances"]
+
+    async def crypto_deposits(self, page: int = 1, per_page: int = 10) -> Any:
+        return await self._request("GET", "/v1/account/crypto-deposit", params={"page": page, "per_page": per_page}, auth=True)
+
+    async def crypto_withdrawals(self, page: int = 1, per_page: int = 10) -> Any:
+        return await self._request(
+            "GET", "/v1/account/crypto-withdrawal", params={"page": page, "per_page": per_page}, auth=True
+        )
+
+    # ---------------------------------------------------------------- orders
+    async def place_order(
+        self,
+        symbol: str,
+        side: str,
+        type: str,
+        quantity: str,
+        price: str | None = None,
+        client_id: str | None = None,
+    ) -> dict:
+        body: dict[str, Any] = {"symbol": symbol.upper(), "side": side.upper(), "type": type.upper(), "quantity": quantity}
+        if price is not None:
+            body["price"] = price
+        if client_id:
+            body["client_id"] = client_id
+        return await self._request("POST", "/v1/account/orders", json=body, auth=True)
+
+    async def get_order(self, client_order_id: str) -> dict:
+        return await self._request("GET", f"/v1/account/orders/{client_order_id}", auth=True)
+
+    async def cancel_order(self, client_order_id: str) -> Any:
+        return await self._request("DELETE", "/v1/account/orders", params={"clientOrderId": client_order_id}, auth=True)
+
+    async def open_orders(self, symbol: str | None = None) -> list[dict]:
+        res = await self._request("GET", "/v1/account/openOrders", params={"symbol": symbol}, auth=True)
+        return res.get("orders", [])
+
+    async def my_trades(self, symbol: str | None = None, side: str | None = None) -> list[dict]:
+        res = await self._request("GET", "/v1/account/trades", params={"symbol": symbol, "side": side}, auth=True)
+        return res.get("AccountLatestTrades", [])
+
+    # ------------------------------------------------------------------- OTC
+    async def otc_markets(self) -> dict[str, dict]:
+        res = await self._cached("otc_markets", 30, lambda: self._request("GET", "/v1/otc/markets"))
+        return res["symbols"]
+
+    async def otc_price(self, symbol: str, side: str) -> dict:
+        return await self._request(
+            "GET", "/v1/account/otc/price", params={"symbol": symbol.upper(), "side": side.upper()}, auth=True
+        )
+
+    async def otc_order(self, symbol: str, side: str, amount: float) -> dict:
+        return await self._request(
+            "POST",
+            "/v1/account/otc/orders",
+            json={"symbol": symbol.upper(), "side": side.upper(), "amount": amount},
+            auth=True,
+        )

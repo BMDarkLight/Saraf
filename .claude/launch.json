@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "wallex-agent",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "--project", "backend", "python", "-m", "wallex_agent.server"],
+      "port": 8000
+    },
+    {
+      "name": "mock-llm",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "--project", "backend", "python", "backend/scripts/mock_llm.py"],
+      "port": 1234
+    }
+  ]
+}
