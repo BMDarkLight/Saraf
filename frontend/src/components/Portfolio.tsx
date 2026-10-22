@@ -25,7 +25,7 @@ export function Portfolio({ refreshKey, onAsk }: { refreshKey: number; onAsk: (t
 
   const fw = d?.futures?.wallets ?? {};
   return (
-    <div className="card" style={{ flex: 1 }}>
+    <div className="card portfolio-card">
       <div className="card-h">
         پورتفو
         <span className="spacer" />

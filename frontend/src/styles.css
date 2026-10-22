@@ -106,7 +106,9 @@ a:hover { text-decoration: underline; }
 /* side column scrolls as a whole; the portfolio keeps a usable height instead of being squeezed */
 .col.side-left { overflow-y: auto; overscroll-behavior: contain; padding-inline-end: 2px; }
 .col.side-left > .card { flex: none; }
-.col.side-left > .card:last-child { flex: 1 0 auto; min-height: 340px; }
+/* the real account and the engine come first and stay fully visible; long decision lists scroll inside */
+.portfolio-card { max-height: min(600px, 66vh); }
+.portfolio-card > .scroll { flex: 1; }
 .seg.side-switch { display: none; }
 .card {
   background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--radius);

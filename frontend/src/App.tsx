@@ -94,9 +94,9 @@ export default function App() {
           <Chat ref={chat} onTrade={() => setRefresh((x) => x + 1)} onSymbol={setSymbol} />
         </section>
         <section className={`col side-left ${tab === "trade" ? "active" : ""} ${tab !== "markets" ? "side-on" : ""}`}>
+          <Portfolio refreshKey={refresh} onAsk={ask} />
           <PriceChart symbol={symbol} theme={String(dark)} />
           <OrderBook symbol={symbol} />
-          <Portfolio refreshKey={refresh} onAsk={ask} />
         </section>
       </main>
       <AlertToasts onAsk={ask} />
