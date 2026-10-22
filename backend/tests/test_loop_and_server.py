@@ -311,3 +311,41 @@ def test_strategy_real_switch_needs_confirmation_and_sets_the_profile(tmp_path, 
     assert not r["strategy_live"] and not profile.exists()
     assert "--mode live" in (tmp_path / "data/engine/mode.env").read_text()   # the app's mode stays the header's call
     c.post("/api/engine/mode", json={"mode": "shadow"})                          # leave the app in paper mode
+
+
+async def test_scheduled_strategy_switch_fires_once(tmp_path, monkeypatch):
+    import asyncio
+    from fastapi.testclient import TestClient
+    from wallex_agent import server
+
+    calls = []
+
+    class Proc:
+        returncode = 0
+        async def communicate(self):
+            return b"", b""
+
+    async def fake_exec(*args, **kw):
+        calls.append(args)
+        return Proc()
+
+    sched = tmp_path / "data/engine/strategy-live-at.json"
+    monkeypatch.setattr(server, "ENGINE_MODE_FILE", tmp_path / "data/engine/mode.env")
+    monkeypatch.setattr(server, "STRATEGY_PROFILE_FILE", tmp_path / "data/engine/profile.env")
+    monkeypatch.setattr(server, "STRATEGY_SCHEDULE_FILE", sched)
+    monkeypatch.setattr(server.shutil, "which", lambda name: "/bin/systemctl")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    c = TestClient(server.app)
+    later = "2099-01-01T12:00:00+03:30"
+    assert c.post("/api/strategy/schedule", json={"at": later}).status_code == 400            # no confirmation
+    assert c.post("/api/strategy/schedule", json={"at": "2020-01-01T00:00:00+00:00", "confirm": "LIVE"}).status_code == 400
+    assert c.post("/api/strategy/schedule", json={"at": later, "confirm": "LIVE"}).json()["live_at"] == server.strategy_live_at()
+    await server._run_strategy_schedule()
+    assert not calls and sched.exists()                                                      # not due yet
+    sched.write_text(json.dumps({"at": time.time() - 1}))
+    await server._run_strategy_schedule()
+    assert server.strategy_is_live() and not sched.exists() and calls[-1] == ("systemctl", "restart", "wallex-engine")
+    await server._run_strategy_schedule()
+    assert len(calls) == 1                                                                   # one shot
+    c.post("/api/strategy/live", json={"on": False})
+    c.post("/api/engine/mode", json={"mode": "shadow"})                                      # leave the app in paper mode

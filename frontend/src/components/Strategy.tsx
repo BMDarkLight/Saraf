@@ -30,7 +30,7 @@ export function Strategy({ onModeChanged }: { onModeChanged?: () => void }) {
         </div>
       </div>
       <div className="card-b strat">
-        {d && <RealSwitch on={!!d.strategy_live} onChanged={() => {
+        {d && <RealSwitch on={!!d.strategy_live} liveAt={d.live_at} now={now} onChanged={() => {
           onModeChanged?.();
           for (const ms of [0, 5000, 15000, 30000]) setTimeout(load, ms);   // the engine restarts in the new mode
         }} />}
@@ -43,7 +43,7 @@ export function Strategy({ onModeChanged }: { onModeChanged?: () => void }) {
 }
 
 /** Runs the strategy for real: the main engine goes live with the strategy's settings. Asks first, both ways. */
-function RealSwitch({ on, onChanged }: { on: boolean; onChanged: () => void }) {
+function RealSwitch({ on, liveAt, now, onChanged }: { on: boolean; liveAt?: number | null; now: number; onChanged: () => void }) {
   const [ask, setAsk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
@@ -59,8 +59,19 @@ function RealSwitch({ on, onChanged }: { on: boolean; onChanged: () => void }) {
       onChanged();
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
+  const cancelSchedule = async () => {
+    await fetch("/api/strategy/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    onChanged();
+  };
   return (
     <div className="strat-real">
+      {liveAt && !on && (
+        <div className="mode-line real strat-sched">
+          <span>اجرای واقعی خودکار: <bdi className="num">{hhmm(liveAt * 1000)}</bdi> ({countdown(liveAt * 1000 - now)} دیگر)</span>
+          <span className="spacer" />
+          <button className="btn ghost sm" onClick={cancelSchedule}>لغو</button>
+        </div>
+      )}
       <div className="seg mode-switch" role="radiogroup" aria-label="اجرای استراتژی">
         <button role="radio" aria-checked={!on} className={!on ? "on" : ""} onClick={() => on && setAsk(true)}>
           <span className="dot" />اجرای شبیه‌سازی</button>

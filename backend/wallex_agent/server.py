@@ -10,6 +10,7 @@ import csv
 import json
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -58,6 +59,10 @@ async def _ticker():
                 pass
         try:
             await ctx.alerts.check()
+        except Exception:
+            pass
+        try:
+            await _run_strategy_schedule()
         except Exception:
             pass
         await asyncio.sleep(10)
@@ -393,14 +398,64 @@ async def set_strategy_live(body: StrategyLiveIn):
     if body.on and body.confirm != "LIVE":
         raise HTTPException(400, "running the strategy for real needs confirm=LIVE")
     _need_systemd()
-    if body.on:
+    await _turn_strategy_live(body.on)
+    return {"ok": True, "strategy_live": strategy_is_live()}
+
+
+async def _turn_strategy_live(on: bool) -> None:
+    STRATEGY_SCHEDULE_FILE.unlink(missing_ok=True)   # a manual switch replaces any scheduled one
+    if on:
         STRATEGY_PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
         STRATEGY_PROFILE_FILE.write_text(STRATEGY_ENV.read_text())
         _write_mode("live")
     else:
         STRATEGY_PROFILE_FILE.unlink(missing_ok=True)
     await _restart_engine()
-    return {"ok": True, "strategy_live": strategy_is_live()}
+
+
+# A scheduled switch to real: {"at": unix seconds}. The web app's ticker fires it once, then deletes it.
+STRATEGY_SCHEDULE_FILE = ROOT / "data" / "engine" / "strategy-live-at.json"
+
+
+def strategy_live_at() -> float | None:
+    try:
+        return float(json.loads(STRATEGY_SCHEDULE_FILE.read_text())["at"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+async def _run_strategy_schedule() -> None:
+    at = strategy_live_at()
+    if at is None or time.time() < at:
+        return
+    STRATEGY_SCHEDULE_FILE.unlink(missing_ok=True)   # one shot, even if the restart fails
+    if not strategy_is_live():
+        await _turn_strategy_live(True)
+
+
+class StrategyScheduleIn(BaseModel):
+    at: str | None = None   # ISO-8601 with offset; None cancels
+    confirm: str = ""
+
+
+@app.post("/api/strategy/schedule")
+async def schedule_strategy_live(body: StrategyScheduleIn):
+    """Schedule the switch to running the strategy for real (same effect as the switch, at a set time)."""
+    if body.at is None:
+        STRATEGY_SCHEDULE_FILE.unlink(missing_ok=True)
+        return {"ok": True, "live_at": None}
+    if body.confirm != "LIVE":
+        raise HTTPException(400, "scheduling real trading needs confirm=LIVE")
+    try:
+        at = datetime.fromisoformat(body.at.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(400, "at must be ISO-8601, e.g. 2026-10-23T12:00:00+03:30")
+    if at.tzinfo is None or at.timestamp() <= time.time():
+        raise HTTPException(400, "at must be in the future and carry a UTC offset")
+    _need_systemd()
+    STRATEGY_SCHEDULE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STRATEGY_SCHEDULE_FILE.write_text(json.dumps({"at": at.timestamp(), "iso": at.isoformat()}))
+    return {"ok": True, "live_at": at.timestamp()}
 
 
 _key_check: dict = {"at": 0.0, "main": None}
@@ -473,7 +528,7 @@ async def strategy():
     # the run with the USDT core is the strategy; prefer the app's own mode when both have it
     mode = next((m for m in runs if (engine_status(m) or {}).get("core")), runs[0] if runs else None)
     if not mode:
-        return {"engine": None, "strategy_live": strategy_is_live()}
+        return {"engine": None, "strategy_live": strategy_is_live(), "live_at": strategy_live_at()}
     eng = engine_status(mode)
     start = _last_start(engine_dir(mode))
     cfg = start.get("config") or {}
@@ -500,7 +555,8 @@ async def strategy():
     capital = eng["capital_tmn"]
     first = pts[0][1] if pts else capital
     return {
-        "mode": start.get("mode") or mode, "run": mode, "engine": eng, "strategy_live": strategy_is_live(), "quote": cfg.get("engine_quote", "TMN"), "started": start.get("time"),
+        "mode": start.get("mode") or mode, "run": mode, "engine": eng, "strategy_live": strategy_is_live(),
+        "live_at": strategy_live_at(), "quote": cfg.get("engine_quote", "TMN"), "started": start.get("time"),
         "end_time": cfg.get("engine_end_time") or settings.engine_end_time or None,
         "params": {k.removeprefix("engine_"): cfg.get(k) for k in (
             "engine_max_exposure_pct", "engine_max_position_pct", "engine_max_positions", "engine_risk_per_trade_pct",

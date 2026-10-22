@@ -535,3 +535,5 @@ table.evidence td { padding: 6px 4px; border-bottom: 1px solid var(--border-soft
 .curve-y.top { top: 20px; }
 .curve-y.bottom { bottom: 2px; }
 .strat-real { display: grid; gap: 8px; }
+.strat-sched { display: flex; align-items: center; gap: 8px; }
+.strat-sched .spacer { flex: 1; }
