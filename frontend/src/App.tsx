@@ -7,6 +7,7 @@ import { Markets } from "./components/Markets";
 import { OrderBook } from "./components/OrderBook";
 import { Portfolio } from "./components/Portfolio";
 import { PriceChart } from "./components/PriceChart";
+import { Strategy } from "./components/Strategy";
 
 type Tab = "markets" | "chat" | "trade";
 
@@ -140,6 +141,7 @@ export default function App() {
           <Chat ref={chat} onTrade={() => setRefresh((x) => x + 1)} onSymbol={setSymbol} />
         </section>
         <section className={`col side-left ${tab === "trade" ? "active" : ""} ${tab !== "markets" ? "side-on" : ""}`}>
+          <Strategy />
           <Portfolio refreshKey={refresh} onAsk={ask} assistantLive={cfg?.spot_mode === "live"} onModeChanged={reloadCfg} />
           <OrderBook symbol={symbol} />
           <FearGreed />

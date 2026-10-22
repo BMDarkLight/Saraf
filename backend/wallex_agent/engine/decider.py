@@ -103,6 +103,16 @@ class Regime(BaseModel):
         return str(v).strip().lower().replace("-", "_").replace(" ", "_")
 
 
+class CoreExit(BaseModel):
+    action: Literal["SELL_SLICE", "WAIT"]
+    reasoning: str = ""
+
+    @field_validator("action", mode="before")
+    @classmethod
+    def _action(cls, v):
+        return str(v).strip().upper().replace(" ", "_")
+
+
 @dataclass
 class Decision:
     """What the engine logs: the decision plus provenance."""
@@ -138,6 +148,11 @@ Respond with ONE JSON object only, no prose, matching the requested schema."""
 ENTRY_SCHEMA = ('{"action": "TAKE"|"SKIP", "confidence": 0..1, "size_fraction": 0..1, '
                 '"stop_atr": 0.8..3.0, "target_atr": 1.2..6.0, "reasoning": "<=2 sentences, in Persian (Farsi)"}')
 REVIEW_SCHEMA = '{"action": "HOLD"|"EXIT"|"TIGHTEN", "new_stop": number|null, "reasoning": "<=2 sentences, in Persian (Farsi)"}'
+CORE_EXIT_SCHEMA = '{"action": "SELL_SLICE"|"WAIT", "reasoning": "<=2 sentences, in Persian (Farsi)"}'
+USDT_DESK = """
+THIS DESK'S STRUCTURE: idle capital is held as USDT (the "core"): the toman's depreciation against the dollar was
+the only edge that survived fees in testing (USDT/TMN +78% over 180 days). The dip setups trade X/USDT markets
+(round trip about {fee2:.2f}%), funded from that USDT. Near the end the core is sold back to TMN in slices."""
 REGIME_SCHEMA = '{"regime": "risk_on"|"neutral"|"risk_off", "reasoning": "<=2 sentences, in Persian (Farsi)"}'
 
 
@@ -172,15 +187,16 @@ class AIDecider:
     name = "ai"
 
     def __init__(self, llm: AsyncOpenAI, model: str, cache: ResponseCache, fee_rate: float,
-                 timeout: float = 45.0, offline: bool = False, extra_body: dict | None = None):
+                 timeout: float = 45.0, offline: bool = False, extra_body: dict | None = None, quote: str = "TMN"):
         self.llm, self.model, self.cache = llm, model, cache
+        self.quote = quote
         self.extra_body = extra_body or {}   # provider switches, e.g. {"reasoning_effort": "none"} for Qwen
         self.fee_rate, self.timeout = fee_rate, timeout
         self.offline = offline  # backtest replay: cache only, never call the API
         self.calls = 0
 
     async def _ask(self, user: str, schema: type[BaseModel]) -> Decision:
-        system = SYSTEM.format(fee2=2 * 100 * self.fee_rate)
+        system = (SYSTEM + (USDT_DESK if self.quote == "USDT" else "")).format(fee2=2 * 100 * self.fee_rate)
         opts = json.dumps(self.extra_body, sort_keys=True) if self.extra_body else ""
         key = hashlib.sha256(f"{self.model}\n{opts}\n{system}\n{user}".encode()).hexdigest()
         raw, source = self.cache.get(key), "cache"
@@ -239,6 +255,18 @@ class AIDecider:
             d.payload = {"regime": "neutral", "reasoning": f"fail-safe neutral ({d.error})"}
         return d
 
+    async def time_core_exit(self, ctx: dict) -> Decision:
+        user = (f"USDT CORE EXIT\n{json.dumps(ctx, ensure_ascii=False, default=str)}\n\n"
+                "The challenge settles in TMN, so the USDT core is being sold back to TMN in slices before the end. "
+                "Decide whether to sell the next slice NOW or WAIT for a better USDT/TMN price. USDT/TMN trends "
+                "(momentum, not mean reversion): while it is still rising (positive 1h/4h returns, 1h trend up) waiting "
+                "usually pays; sell when the rise stalls or turns down, or the book shows heavy selling. Waiting past "
+                "the deadline is impossible: the slice is then sold automatically. Schema: " + CORE_EXIT_SCHEMA)
+        d = await self._ask(user, CoreExit)
+        if not d.payload:
+            d.payload = {"action": "WAIT", "reasoning": f"fail-safe wait; the schedule sells by the deadline ({d.error})"}
+        return d
+
 
 class RuleDecider:
     """Baseline without AI: take every candidate above the score threshold at full size."""
@@ -262,3 +290,9 @@ class RuleDecider:
         breadth = ctx.get("breadth_pct_up_24h", 50)
         regime = "risk_off" if breadth < 25 else "risk_on" if breadth > 65 else "neutral"
         return Decision({"regime": regime, "reasoning": f"rule baseline: breadth {breadth}%"}, "rules")
+
+    async def time_core_exit(self, ctx: dict) -> Decision:
+        """Momentum rule: sell a slice once USDT/TMN's last hour turned down, else wait for the schedule."""
+        ret_4 = (ctx.get("usdt_tmn_features_15m_and_1h") or {}).get("ret_4", 0) or 0
+        act = "SELL_SLICE" if ret_4 < 0 else "WAIT"
+        return Decision({"action": act, "reasoning": f"rule baseline: USDT/TMN 1h return {ret_4:+.2f}%"}, "rules")

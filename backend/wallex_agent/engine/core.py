@@ -19,8 +19,10 @@ from pathlib import Path
 
 from ..config import Settings
 from . import strategy
+from .allocator import CoreAllocator
 from .features import compute
 from .journal import Journal
+from .markets import split_symbol
 from .risk import RiskManager
 
 
@@ -61,6 +63,9 @@ class Engine:
             self.state.update(json.loads(state_path.read_text()))
         self.maker = settings.engine_execution == "maker" and hasattr(broker, "place_limit")
         self._last_mark = 0.0
+        # Books are kept in TMN (the challenge's unit); the satellite trades X/<quote> markets.
+        self.quote = settings.engine_quote
+        self.core = CoreAllocator(self) if self.quote == "USDT" and settings.engine_core_enabled else None
 
     # ---------------------------------------------------------------- utils
     def save(self) -> None:
@@ -77,31 +82,44 @@ class Engine:
     def pending(self) -> dict:
         return self.state["pending"]
 
+    async def rate(self) -> float:
+        """TMN per unit of the trading quote: 1 on TMN markets, the USDT/TMN bid on USDT markets."""
+        return 1.0 if self.quote == "TMN" else (await self.feed.quote("USDTTMN"))["bid"]
+
+    async def _tmn_value(self, asset: str, qty: float, rate: float) -> float | None:
+        if asset == "TMN":
+            return qty
+        if asset == "USDT":
+            return qty * (rate if self.quote == "USDT" else (await self.feed.quote("USDTTMN"))["bid"])
+        for symbol, conv in ((f"{asset}{self.quote}", rate), (f"{asset}TMN", 1.0)):
+            try:
+                bid = (await self.feed.quote(symbol))["bid"]
+            except Exception:   # no such market
+                continue
+            if bid:
+                return qty * bid * conv
+        return None
+
     async def equity(self) -> tuple[float, float, float]:
-        """(equity, free cash, exposure), valued from what the exchange actually holds: TMN (free +
-        reserved by open buys) plus every managed coin incl. coins locked in sells or just bought by
-        an entry order that filled moments ago (the engine may not have recorded it yet)."""
-        cash = await self.broker.cash()
-        total = await self.broker.total_cash() if hasattr(self.broker, "total_cash") else cash
-        exposure = total - cash
-        symbols = {p["base"]: p["symbol"] for p in [*self.positions.values(), *self.pending.values()]}
-        for base, symbol in symbols.items():
-            if hasattr(self.broker, "holding_total"):
-                qty = await self.broker.holding_total(base)
-            else:
-                qty = sum(p["qty"] for p in self.positions.values() if p["base"] == base)
-            exposure += qty * (await self.feed.quote(symbol))["bid"]
-        # Coins the engine doesn't manage (e.g. bought through the chat assistant on the same account)
-        # still count: otherwise converting TMN by hand looks like a crash and trips the drawdown stop.
-        if hasattr(self.broker, "all_holdings"):
-            for asset, qty in (await self.broker.all_holdings()).items():
-                if asset in symbols or qty <= 0:
-                    continue
-                try:
-                    exposure += qty * (await self.feed.quote(f"{asset}TMN"))["bid"]
-                except Exception:   # no TMN market for it: can't value it, leave it out
-                    pass
-        return cash + exposure, cash, exposure
+        """(equity, free cash, exposure) in TMN, valued from what the exchange actually holds: every asset
+        incl. coins locked in sells or just bought by an entry that filled moments ago (the engine may not
+        have recorded it yet), and coins the engine doesn't manage (e.g. bought through the chat assistant on
+        the same account): otherwise converting by hand looks like a crash and trips the drawdown stop.
+        Cash is the free trading quote; exposure is every non-cash coin plus quote reserved by resting buys."""
+        rate = await self.rate()
+        wallet = await self.broker.wallet()
+        free_q, total_q = wallet.get(self.quote, (0.0, 0.0))
+        equity = exposure = 0.0
+        for asset, (_, total) in wallet.items():
+            if total <= 0:
+                continue
+            value = await self._tmn_value(asset, total, rate)
+            if value is None:   # no market to value it in: leave it out
+                continue
+            equity += value
+            if asset not in ("TMN", self.quote):   # in TMN mode a USDT holding is exposure, as before
+                exposure += value
+        return equity, free_q * rate, exposure + (total_q - free_q) * rate
 
     async def reconcile(self) -> None:
         """After a restart, trust the exchange: drop positions whose coins are gone."""
@@ -141,6 +159,7 @@ class Engine:
                 "htf_trend", "htf_ema20", "htf_ema50", "htf_rsi", "htf_ret_24")
         return {
             "time_utc": time.strftime("%Y-%m-%d %H:%M", time.gmtime(now)),
+            "market_quote": self.quote,
             "hours_left_in_challenge": round((self.end_ts - now) / 3600, 1) if self.end_ts else None,
             "features_15m_and_1h": r({k: f[k] for k in keep}),
             "order_book": await self.feed.book(symbol),
@@ -183,9 +202,9 @@ class Engine:
 
     async def _update_regime(self, now: float) -> None:
         ctx = {"time_utc": time.strftime("%Y-%m-%d %H:%M", time.gmtime(now)), **(await self.feed.market_context())}
-        btc = "BTCTMN" in await self.feed.universe()
-        if btc:
-            bars, htf = await self.feed.bars("BTCTMN")
+        btc = f"BTC{self.quote}"
+        if btc in await self.feed.universe():
+            bars, htf = await self.feed.bars(btc)
             f = compute(bars, htf)
             if f:
                 ctx["btc"] = r({k: f[k] for k in ("htf_trend", "htf_ret_24", "htf_rsi", "ret_16", "atr_pct")})
@@ -209,6 +228,7 @@ class Engine:
             now=now, equity=eq, peak=self.state["peak"], n_positions=len(self.positions) + len(self.pending),
             regime=self.state["regime"], pause_until=self.state["pause_until"], halted=self.state["halted"],
             end_ts=self.end_ts, cooldown_until=self.state["cooldown"].get(cand.symbol, 0))
+        block = block or (self.core and self.core.blocks_entries())
         if block:
             self.journal.log("risk_block", now, symbol=cand.symbol, setup=cand.setup, reason=block, candidate=cand.dict())
             return
@@ -223,20 +243,22 @@ class Engine:
         quote = await self.feed.quote(cand.symbol)
         price = quote["ask"]
         stop, target = self.risk.clamp_stop_target(price, cand.atr, dp["stop_atr"], dp["target_atr"])
-        self.risk.min_notional = await self.feed.min_notional(cand.symbol)
+        rate = await self.rate()   # sizing is in TMN; orders are in the market's quote
+        self.risk.min_notional = await self.feed.min_notional(cand.symbol) * rate
         sz = self.risk.size(equity=eq, cash=cash, exposure=exposure, price=price, stop=stop,
                             size_fraction=dp["size_fraction"], regime=self.state["regime"])
         if not sz.quote_amount:
             self.journal.log("risk_block", now, symbol=cand.symbol, setup=cand.setup, reason=sz.reason)
             return
-        base = cand.symbol.removesuffix("TMN")
+        base = split_symbol(cand.symbol)[0]
+        amount_q = sz.quote_amount / rate
         plan = {"symbol": cand.symbol, "base": base, "setup": cand.setup, "atr": cand.atr, "rules": cand.rules,
                 "stop_atr": dp["stop_atr"], "target_atr": dp["target_atr"], "confidence": dp["confidence"],
                 "reasoning": dp["reasoning"], "sizing": sz.reason}
         if self.maker:   # rest a limit at the bid instead of paying the spread + taker fee
             limit = quote["bid"]
             try:
-                oid = await self.broker.place_limit(cand.symbol, "BUY", sz.quote_amount / limit, limit, base)
+                oid = await self.broker.place_limit(cand.symbol, "BUY", amount_q / limit, limit, base)
             except Exception as e:
                 self.journal.log("error", now, symbol=cand.symbol, error=f"limit buy failed: {e}")
                 return
@@ -249,18 +271,20 @@ class Engine:
             self.save()
             return
         try:
-            fill = await self.broker.buy(cand.symbol, sz.quote_amount, base)
+            fill = await self.broker.buy(cand.symbol, amount_q, base)
         except Exception as e:
             self.journal.log("error", now, symbol=cand.symbol, error=f"buy failed: {e}")
             return
         await self._open_position(plan, fill.qty, fill.price, fill.tmn, now)
 
     async def _open_position(self, plan: dict, qty: float, price: float, cost: float, now: float) -> None:
+        """`cost` is in the market's quote; cost_tmn converts it at today's rate."""
+        rate = await self.rate()
         self.state["seq"] += 1
         pid = f"T{self.state['seq']:04d}"
         stop, target = self.risk.clamp_stop_target(price, plan["atr"], plan["stop_atr"], plan["target_atr"])
         p = {"id": pid, "symbol": plan["symbol"], "base": plan["base"], "setup": plan["setup"], "qty": qty,
-             "entry_price": price, "cost_tmn": cost, "entry_time": now, "stop": stop, "initial_stop": stop,
+             "entry_price": price, "cost_q": cost, "cost_tmn": cost * rate, "quote": self.quote, "entry_time": now, "stop": stop, "initial_stop": stop,
              "target": target, "atr": plan["atr"], "highest": price, "bars_held": 0,
              "ai_confidence": plan["confidence"], "reasoning": plan["reasoning"], "rules": plan["rules"],
              "tp_order": None}
@@ -304,7 +328,7 @@ class Engine:
                 continue
             bid = (await self.feed.quote(p["symbol"]))["bid"]
             view = {k: p[k] for k in ("symbol", "setup", "entry_price", "stop", "target", "bars_held", "reasoning")}
-            view.update(current_bid=bid, unrealized_pct=round(100 * (bid * p["qty"] / p["cost_tmn"] - 1), 2))
+            view.update(current_bid=bid, unrealized_pct=round(100 * (bid * p["qty"] / p.get("cost_q", p["cost_tmn"]) - 1), 2))
             d = await self.decider.review_position(r(view), await self._context(p["symbol"], f))
             act = d.payload["action"]
             self.journal.log("review", now, symbol=p["symbol"], position_id=pid, action=act, source=d.source,
@@ -319,7 +343,7 @@ class Engine:
     async def _time_stop(self, p: dict, now: float) -> None:
         if p["bars_held"] >= self.s.engine_time_stop_bars:
             bid = (await self.feed.quote(p["symbol"]))["bid"]
-            if bid * p["qty"] < p["cost_tmn"] * 1.005:   # not working after N bars: free the capital
+            if bid * p["qty"] < p.get("cost_q", p["cost_tmn"]) * 1.005:   # not working after N bars: free the capital
                 await self._exit(p["id"], "time_stop", now)
 
     # --------------------------------------------------------------- monitor
@@ -346,9 +370,12 @@ class Engine:
                                                             f"{self.s.engine_pause_hours:g}h", equity=eq)
         if self.end_ts and now >= self.end_ts - self.s.engine_flatten_before_end_min * 60 and not self.state["flattened"]:
             await self.flatten(now, "challenge_end")
-            self.state["flattened"] = True
+            if self.core is None or await self.core.final_exit(now):   # satellite first, then the USDT core
+                self.state["flattened"] = True
             self.save()
             return
+        if self.core:
+            await self.core.tick(now)
 
         fee = self.s.engine_fee_rate
         for pid, p in list(self.positions.items()):
@@ -413,9 +440,14 @@ class Engine:
 
     async def _closed(self, pid: str, proceeds: float, price: float, reason: str, now: float,
                       note: str | None = None) -> None:
+        """`proceeds` is in the market's quote. P&L is the trade's own, in its quote, converted at the exit
+        rate (on USDT markets the core's USDT/TMN move is not credited to the satellite)."""
         p = self.positions.pop(pid)
-        pnl = proceeds - p["cost_tmn"]
-        pnl_pct = round(100 * pnl / p["cost_tmn"], 3)
+        cost_q = p.get("cost_q", p["cost_tmn"])
+        rate = await self.rate()
+        pnl = (proceeds - cost_q) * rate
+        pnl_pct = round(100 * (proceeds / cost_q - 1), 3)
+        proceeds = proceeds * rate
         self.state["cooldown"][p["symbol"]] = now + self.s.engine_cooldown_bars * self.tf * 60
         self.state["closed"].append({"id": pid, "symbol": p["symbol"], "pnl_pct": pnl_pct, "reason": reason})
         self.state["closed"] = self.state["closed"][-50:]

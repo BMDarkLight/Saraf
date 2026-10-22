@@ -36,7 +36,7 @@ def make_decider(s: Settings, kind: str, offline: bool = False):
                       api_key=s.engine_llm_api_key or s.llm_api_key or "missing")
     extra = json.loads(s.engine_llm_extra_body) if s.engine_llm_extra_body.strip() else None
     return AIDecider(llm, s.engine_llm_model or s.llm_model, ResponseCache(s.data_dir / "ai_cache.jsonl"),
-                     s.engine_fee_rate, offline=offline, extra_body=extra)
+                     s.engine_fee_rate, offline=offline, extra_body=extra, quote=s.engine_quote)
 
 
 def counterfactual(feed: SimFeed, run_dir: Path, fee: float, horizon_s: int) -> dict:
@@ -75,6 +75,8 @@ async def run_backtest(s: Settings, days: float, end: float | None = None, kinds
     try:
         if not symbols:
             symbols = await LiveFeed(client, s).universe()
+        if s.engine_quote == "USDT" and "USDTTMN" not in symbols:   # values the USDT core in TMN
+            symbols = [*symbols, "USDTTMN"]
         # Historical spreads don't exist, so a snapshot stands in for them. It is saved per window
         # end and reused, otherwise reruns would silently use different spreads (and results).
         spread_file = ROOT / "data" / "history" / f"spreads_{int(end)}.json"
@@ -108,7 +110,8 @@ async def run_backtest(s: Settings, days: float, end: float | None = None, kinds
             for f in run_dir.iterdir():
                 f.unlink()
         feed = SimFeed({k: v for k, v in m1.items() if v}, h1, s.engine_timeframe_min, spreads, fng)
-        broker = SimExec(feed, s.engine_capital_tmn, s.engine_fee_rate, maker_fee_rate=s.maker_fee)
+        broker = SimExec(feed, s.engine_capital_tmn, s.engine_fee_rate, maker_fee_rate=s.maker_fee,
+                         quote=s.engine_quote, tmn_fee_rate=s.engine_core_fee_rate)
         settings = s.model_copy(update={"engine_end_time": datetime.fromtimestamp(end, timezone.utc).isoformat()})
         decider = make_decider(settings, kind, offline)
         journal = Journal(run_dir)
@@ -128,7 +131,9 @@ async def run_backtest(s: Settings, days: float, end: float | None = None, kinds
         eq, cash, exp = await engine.equity()
         journal.mark(end, eq, cash, exp, engine.risk.drawdown(eq, engine.state["peak"]))
         m = compute_metrics(run_dir, s.engine_capital_tmn)
-        m["fees_paid_tmn"] = round(broker.fees_paid)
+        usdt_tmn = (await feed.quote("USDTTMN"))["bid"] if "USDTTMN" in feed.m1 else 0.0
+        m["fees_paid_tmn"] = round(broker.fees_by.get("TMN", 0.0) + broker.fees_by.get("USDT", 0.0) * usdt_tmn)
+        m["strategy"] = {"quote": s.engine_quote, "core": bool(engine.core), "core_state": engine.state.get("core")}
         m["llm_calls"] = getattr(decider, "calls", 0)
         cf = counterfactual(feed, run_dir, s.engine_fee_rate, s.engine_time_stop_bars * bar)
         m["counterfactual_by_action"] = cf

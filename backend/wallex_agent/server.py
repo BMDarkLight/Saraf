@@ -262,16 +262,25 @@ async def portfolio():
     return out
 
 
-ENGINE_EVENTS = {"regime", "decision", "risk_block", "entry_order", "entry", "entry_cancelled", "exit", "review",
+ENGINE_EVENTS = {"core", "core_decision", "regime", "decision", "risk_block", "entry_order", "entry", "entry_cancelled", "exit", "review",
                  "circuit_breaker", "error", "start", "stop"}
 
 
-def engine_status() -> dict | None:
+STRATEGY_RUN = "strategy"   # deploy/wallex-strategy.service: the USDT strategy in shadow beside the main engine
+
+
+def engine_dir(mode: str | None = None) -> Path | None:
+    """The journal directory of the engine run in `mode` (default: the app's mode; else whichever exists).
+    A live engine and a shadow session can run side by side, so the newest file must not decide."""
+    order = [mode] if mode else [requested_engine_mode(), "shadow", "live"]
+    return next((d for d in (ROOT / "data" / "engine" / m for m in order) if (d / "state.json").exists()), None)
+
+
+def engine_status(mode: str | None = None) -> dict | None:
     """The autonomous engine's state, read from its journal (it runs as a separate process)."""
-    runs = [d for d in (ROOT / "data" / "engine" / m for m in ("live", "shadow")) if (d / "state.json").exists()]
-    if not runs:
+    d = engine_dir(mode)
+    if d is None:
         return None
-    d = max(runs, key=lambda p: (p / "state.json").stat().st_mtime)
     state = json.loads((d / "state.json").read_text())
     eq_rows = (d / "equity.csv").read_text().strip().splitlines()[1:] if (d / "equity.csv").exists() else []
     last = eq_rows[-1].split(",") if eq_rows else None
@@ -314,7 +323,8 @@ def engine_status() -> dict | None:
             "regime": state.get("regime"), "regime_reason": state.get("regime_reason"),
             "halted": state.get("halted"), "pause_until": state.get("pause_until"),
             "positions": list(state.get("positions", {}).values()), "pending": pending,
-            "trades": recent, "stats": stats, "events": events}
+            "trades": recent, "stats": stats, "events": events, "core": state.get("core"),
+            "exposure_tmn": float(last[3]) if last else None}
 
 
 MODE_ARGS = {"live": "--mode live --confirm-live", "shadow": "--mode shadow"}
@@ -381,13 +391,78 @@ async def account():
     if eng and eng["positions"]:
         with contextlib.suppress(WallexError):
             markets = await ctx.client.markets()
+            usdt_tmn = float((markets.get("USDTTMN") or {}).get("stats", {}).get("lastPrice") or 0)
             for p in eng["positions"]:   # mark open positions to the last price
                 last = float((markets.get(p["symbol"]) or {}).get("stats", {}).get("lastPrice") or 0)
+                rate = usdt_tmn if p.get("quote") == "USDT" else 1.0
                 if last:
                     p["mark_price"] = last
-                    p["unrealized_pnl_tmn"] = round((last - p["entry_price"]) * p["qty"])
+                    p["unrealized_pnl_tmn"] = round((last - p["entry_price"]) * p["qty"] * rate)
                     p["unrealized_pnl_pct"] = round(100 * (last / p["entry_price"] - 1), 2)
     return out
+
+
+def _last_start(d: Path) -> dict:
+    """The newest `start` event of a run: its config snapshot is the strategy actually running."""
+    if not (d / "decisions.jsonl").exists():
+        return {}
+    with (d / "decisions.jsonl").open("rb") as f:
+        f.seek(0, 2)
+        size = f.tell()
+        for back in (300_000, 3_000_000, size):
+            f.seek(max(0, size - back))
+            for line in reversed(f.read().decode(errors="ignore").splitlines()):
+                if '"event": "start"' in line:
+                    with contextlib.suppress(ValueError):
+                        return json.loads(line)
+            if back >= size:
+                break
+    return {}
+
+
+@app.get("/api/strategy")
+async def strategy():
+    """The running strategy for the strategy panel: phase, USDT core, satellite limits, the end-of-challenge
+    schedule, and equity next to two benchmarks (hold TMN = capital, hold USDT from the first mark)."""
+    runs = [m for m in (requested_engine_mode(), STRATEGY_RUN, "shadow", "live") if engine_dir(m)]
+    # the run with the USDT core is the strategy; prefer the app's own mode when both have it
+    mode = next((m for m in runs if (engine_status(m) or {}).get("core")), runs[0] if runs else None)
+    if not mode:
+        return {"engine": None}
+    eng = engine_status(mode)
+    start = _last_start(engine_dir(mode))
+    cfg = start.get("config") or {}
+    rows = []
+    with contextlib.suppress(OSError):
+        rows = [r.split(",") for r in (engine_dir(mode) / "equity.csv").read_text().strip().splitlines()[1:]]
+    if start.get("ts"):   # this session only: earlier runs of the same mode used other settings
+        rows = [r for r in rows if float(r[0]) >= start["ts"] - 60] or rows[-1:]
+    step = max(1, len(rows) // 240)
+    pts = [(int(r[0]), float(r[1])) for r in rows[::step]] + ([(int(rows[-1][0]), float(rows[-1][1]))] if rows else [])
+    usdt = []
+    if pts:
+        with contextlib.suppress(Exception):   # the benchmark is optional; the panel works without it
+            candles = await ctx.client.candles("USDTTMN", "60", pts[0][0] - 3600, int(time.time()))
+            usdt = [(c["t"], c["c"]) for c in candles]
+    bench, j = [], 0
+    for t, _ in pts:
+        while j + 1 < len(usdt) and usdt[j + 1][0] <= t:
+            j += 1
+        bench.append(usdt[j][1] if usdt else None)
+    base = next((b for b in bench if b), None)
+    capital = eng["capital_tmn"]
+    first = pts[0][1] if pts else capital
+    return {
+        "mode": start.get("mode") or mode, "run": mode, "engine": eng, "quote": cfg.get("engine_quote", "TMN"), "started": start.get("time"),
+        "end_time": cfg.get("engine_end_time") or settings.engine_end_time or None,
+        "params": {k.removeprefix("engine_"): cfg.get(k) for k in (
+            "engine_max_exposure_pct", "engine_max_position_pct", "engine_max_positions", "engine_risk_per_trade_pct",
+            "engine_breadth_gate_pct", "engine_drawdown_pause_pct", "engine_drawdown_stop_pct", "engine_core_guard_pct",
+            "engine_core_exit_hours", "engine_core_exit_slices", "engine_flatten_before_end_min",
+            "engine_no_entry_before_end_min", "engine_fee_rate", "engine_setups", "engine_decider") if k in cfg},
+        "curve": [{"t": t, "equity": round(e), "hold_usdt": round(first * b / base) if b and base else None,
+                   "hold_tmn": round(first)} for (t, e), b in zip(pts, bench)],
+    }
 
 
 @app.get("/api/alerts")

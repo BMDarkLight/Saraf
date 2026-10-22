@@ -102,6 +102,14 @@ class Settings(BaseSettings):
     engine_end_time: str = ""                           # ISO-8601 challenge end; flatten to TMN before it
     engine_no_entry_before_end_min: int = 240
     engine_flatten_before_end_min: int = 45
+    # Strategy (docs/STRATEGY.md): "USDT" = USDT core + dip satellite on X/USDT markets; "TMN" = TMN markets only
+    engine_quote: Literal["TMN", "USDT"] = "TMN"
+    engine_core_enabled: bool = True                    # hold free TMN as USDT (only with ENGINE_QUOTE=USDT)
+    engine_core_tmn_reserve: float = 30_000             # TMN left unconverted
+    engine_core_guard_pct: float = 0.06                 # USDT/TMN this far below its peak -> core to TMN
+    engine_core_exit_hours: float = 6                   # exit window before the challenge end
+    engine_core_exit_slices: int = 3                    # USDT -> TMN in this many AI-timed slices
+    engine_core_fee_rate: float = 0.003                 # taker fee on USDTTMN (TMN market) for backtests
     engine_monitor_seconds: int = 15
 
     # News / web

@@ -252,3 +252,29 @@ def test_engine_mode_switch_requires_live_confirmation(tmp_path, monkeypatch):
     assert c.post("/api/engine/mode", json={"mode": "shadow"}).status_code == 200
     assert "--mode shadow" in (tmp_path / "data/engine/mode.env").read_text()
     assert server.ctx.spot.mode == "paper"   # the chat assistant follows the engine
+
+
+async def test_strategy_endpoint_shows_the_core_run_next_to_live(http, tmp_path, monkeypatch):
+    """A live engine and a shadow strategy session run side by side: each view reads its own journal."""
+    from wallex_agent import server
+
+    now = int(time.time())
+    monkeypatch.setattr(server, "ROOT", tmp_path)
+    monkeypatch.setitem(server.ctx.client.prices, "USDTTMN", 270_000.0)
+    monkeypatch.setattr(server, "ENGINE_MODE_FILE", tmp_path / "data/engine/mode.env")
+    live, shadow = tmp_path / "data/engine/live", tmp_path / "data/engine/shadow"
+    for d, core in ((live, None), (shadow, {"status": "holding", "entry_rate": 270_000})):
+        d.mkdir(parents=True)
+        (d / "state.json").write_text(json.dumps({"positions": {}, "pending": {}, "regime": "neutral", "core": core}))
+        (d / "equity.csv").write_text("time,equity_tmn,cash_tmn,exposure_tmn,drawdown_pct\n"
+                                      + "".join(f"{now - 3600 * (5 - i)},{5_000_000 + 10_000 * i},4900000,0,0\n"
+                                                for i in range(6)))
+    (shadow / "decisions.jsonl").write_text(json.dumps({"ts": now - 6 * 3600, "time": "x", "event": "start", "config": {
+        "engine_quote": "USDT", "engine_end_time": "2026-10-30T12:00:00+00:00", "engine_core_exit_slices": 3}}) + "\n")
+    (tmp_path / "data/engine/mode.env").write_text("ENGINE_RUN_ARGS=--mode live --confirm-live\n")
+    assert server.engine_status()["mode"] == "live"          # the app's mode, not the newest file
+    r = (await http.get("/api/strategy")).json()
+    assert r["mode"] == "shadow" and r["quote"] == "USDT" and r["engine"]["core"]["status"] == "holding"
+    assert r["end_time"].startswith("2026-10-30") and r["params"]["core_exit_slices"] == 3
+    assert len(r["curve"]) >= 6 and r["curve"][-1]["equity"] == 5_050_000 and r["curve"][0]["hold_tmn"] == 5_000_000
+    assert r["curve"][0]["hold_usdt"] is not None

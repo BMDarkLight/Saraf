@@ -1,0 +1,17 @@
+[Unit]
+Description=Wallex strategy session: USDT core + USDT-market satellite, in shadow (docs/STRATEGY.md)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/wallex-agent/backend
+EnvironmentFile=/opt/wallex-agent/.env
+EnvironmentFile=/opt/wallex-agent/deploy/strategy.env
+Environment=PYTHONUNBUFFERED=1 TZ=UTC
+# its own journal (data/engine/strategy), so it never shares state with the main engine in either mode
+ExecStart=/root/.local/bin/uv run --no-dev python -m wallex_agent.engine run --mode shadow --name strategy
+Restart=always
+RestartSec=20
+
+[Install]
+WantedBy=multi-user.target

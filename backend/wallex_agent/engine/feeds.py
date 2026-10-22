@@ -16,9 +16,11 @@ from ..market.sentiment import global_fear_greed
 from ..news.web import crypto_news
 from ..wallex import WallexClient
 from .features import Bar, closed, resample, to_bars
-from .markets import CREDIT_BLOCKED
+from .markets import CREDIT_BLOCKED, split_symbol
 
 DEFAULT_EXCLUDE = {"USDTTMN", "USDCTMN", "DAITMN", "XAUTTMN", "PAXGTMN", "USOONTMN", "COPXONTMN", "SLVONTMN"}
+# stablecoins, gold and tokenised commodities: no dip edge, whatever the quote currency
+EXCLUDED_BASES = {split_symbol(s)[0] for s in DEFAULT_EXCLUDE} | {"FDUSD", "TUSD", "USDS"}
 
 
 def blocked_markets(setting: str) -> set[str]:
@@ -48,7 +50,7 @@ class LiveFeed:
         else:
             rows = []
             for sym, m in (await self.client.markets()).items():
-                if m["quoteAsset"] != "TMN" or sym in DEFAULT_EXCLUDE or sym in blocked:
+                if m["quoteAsset"] != self.s.engine_quote or split_symbol(sym)[0] in EXCLUDED_BASES or sym in blocked:
                     continue
                 st = m.get("stats") or {}
                 bid, ask = safe_float(st.get("bidPrice")), safe_float(st.get("askPrice"))
@@ -114,7 +116,7 @@ class LiveFeed:
         return ctx
 
     async def news(self, symbol: str) -> list[str]:
-        base = symbol.removesuffix("TMN")
+        base = split_symbol(symbol)[0]
         hit = self._news.get(base)
         if hit and hit[0] > time.monotonic():
             return hit[1]
@@ -150,7 +152,7 @@ class SimFeed:
         return self.t
 
     async def universe(self) -> list[str]:
-        return list(self.m1)
+        return [s for s in self.m1 if s != "USDTTMN"]   # USDT/TMN is loaded to value the USDT core, not traded
 
     def _last_closed(self, times: list[int], width: int) -> int:
         return bisect.bisect_right(times, self.t - width) - 1   # index of the last bar with t + width <= now
@@ -198,7 +200,7 @@ class SimFeed:
         return []   # historical headlines are not reproducible; documented limitation
 
     async def min_notional(self, symbol: str) -> float:
-        return 50_000
+        return 50_000 if symbol.endswith("TMN") else 5.0   # Wallex: 50k TMN / 5 USDT
 
     def future_1m(self, symbol: str, start: float, end: float) -> list[Bar]:
         times = self._t1[symbol]

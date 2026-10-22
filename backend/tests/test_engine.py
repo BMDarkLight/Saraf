@@ -1,5 +1,6 @@
 """Engine tests on synthetic, seeded market data (no network, no LLM)."""
 
+import csv
 import json
 import math
 import random
@@ -280,7 +281,6 @@ async def test_client_sends_sub_account_header_on_auth_calls():
 
 async def test_equity_counts_coins_the_engine_did_not_buy(tmp_path):
     """Converting TMN by hand (chat assistant, same account) must not look like a crash to the drawdown stop."""
-    from types import SimpleNamespace as NS
     fake = FakeClient()
     s = make_settings(tmp_path, paper_tmn=5_000_000, paper_usdt=0)
     ex = SpotExec(PaperSpotBroker(fake, s))
@@ -291,6 +291,87 @@ async def test_equity_counts_coins_the_engine_did_not_buy(tmp_path):
             bid, ask = fake._bid_ask(symbol)
             return {"bid": bid, "ask": ask, "last": fake.prices[symbol]}
 
-    eq, cash, exposure = await Engine.equity(NS(broker=ex, feed=Feed(), positions={}, pending={}))
+    eq, cash, exposure = await Engine(s, Feed(), ex, ScriptedDecider(), Journal(tmp_path / "j")).equity()
     assert cash < 1_100_000
     assert eq > 4_950_000          # only fees and half the spread are gone, not 80% of the account
+
+
+# ------------------------------------------------- USDT core + USDT-market satellite (docs/STRATEGY.md)
+def line(start, end, days=4):
+    """1m USDT/TMN bars moving linearly from start to end (tight high/low)."""
+    n = days * 1440
+    return [Bar(T0 + i * 60, p, p * 1.0002, p * 0.9998, p, 100.0)
+            for i, p in ((i, start + (end - start) * i / n) for i in range(n))]
+
+
+class CoreDecider(ScriptedDecider):
+    def __init__(self, core="WAIT", **kw):
+        super().__init__(**kw)
+        self.core, self.core_calls = core, 0
+
+    async def time_core_exit(self, ctx):
+        self.core_calls += 1
+        return Decision({"action": self.core, "reasoning": "scripted core"}, "rules")
+
+
+def usdt_engine(tmp_path, usdt_tmn, decider, **over):
+    m1 = {"AAAUSDT": synth(start=1.0), "BBBUSDT": synth(seed=11, start=2.0), "USDTTMN": usdt_tmn}
+    feed = SimFeed(m1, {k: hourly(v) for k, v in m1.items()}, 15, {k: 0.002 for k in m1})
+    s = make_settings(tmp_path, engine_quote="USDT", engine_universe="AAAUSDT,BBBUSDT", engine_min_score=0.0,
+                      engine_min_atr_pct=0.05, engine_fee_rate=0.0013, engine_maker_fee_rate=0.001,
+                      engine_max_exposure_pct=0.3, engine_max_position_pct=0.125, **over)
+    broker = SimExec(feed, s.engine_capital_tmn, s.engine_fee_rate, maker_fee_rate=s.maker_fee, quote="USDT",
+                     tmn_fee_rate=0.003)
+    return Engine(s, feed, broker, decider, Journal(tmp_path / "run")), broker, feed
+
+
+def end_iso(ts):
+    from datetime import datetime, timezone
+    return datetime.fromtimestamp(ts, timezone.utc).isoformat()
+
+
+async def test_usdt_core_rides_the_rate_and_ends_in_toman(tmp_path):
+    end_ts = T0 + 3 * 86_400
+    engine, broker, feed = usdt_engine(tmp_path, line(270_000, 280_000), CoreDecider(core="WAIT"),
+                                       engine_end_time=end_iso(end_ts))
+    feed.t = T0 + 86_400
+    await engine.monitor()
+    assert broker.cash_by["TMN"] < 60_000 and broker.cash_by["USDT"] > 17      # converted at the start
+    assert engine.state["core"]["status"] == "holding"
+    eq, cash, exposure = await engine.equity()
+    assert cash == pytest.approx(broker.cash_by["USDT"] * (await feed.quote("USDTTMN"))["bid"])
+    assert exposure == 0 and eq > 4_970_000                                     # only the conversion fee is gone
+    await run(engine, feed, T0 + 86_400 + 60, end_ts)
+    assert engine.state["flattened"] and not engine.positions and engine.state["core"]["status"] == "done"
+    assert broker.cash_by["USDT"] * 280_000 < 50_000 and not any(v > 1e-9 for v in broker.holdings.values())
+    trades = list(csv.DictReader((tmp_path / "run" / "trades.csv").open()))
+    core = [t for t in trades if t["setup"] == "usdt_core"]
+    assert len(core) == 3 and sum(float(t["pnl_tmn"]) for t in core) > 0       # the rate rose ~2.4% over the window
+    assert broker.cash_by["TMN"] > 5_000_000                                     # realized in TMN, above capital
+    sat = [t for t in trades if t["setup"] != "usdt_core"]
+    assert all(float(t["cost_tmn"]) <= 0.125 * 5_200_000 for t in sat)          # satellite sized in TMN, capped
+
+
+async def test_core_guard_moves_to_toman_and_blocks_entries(tmp_path):
+    crash = line(270_000, 270_000)
+    crash = [b if i < 1440 + 600 else Bar(b.t, 250_000, 250_050, 249_950, 250_000, 100.0) for i, b in enumerate(crash)]
+    engine, broker, feed = usdt_engine(tmp_path, crash, CoreDecider())
+    await run(engine, feed, T0 + 86_400, T0 + 86_400 + 900 * 60)
+    st = engine.state["core"]
+    assert st["status"] == "guarded" and broker.cash_by["USDT"] * 250_000 < 50_000
+    events = [json.loads(l) for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines()]
+    guard_ts = next(e["ts"] for e in events if e["event"] == "core" and e["reason"].startswith("guard"))
+    assert not any(e["event"] in ("entry", "entry_order") and e["ts"] > guard_ts for e in events)
+
+
+async def test_core_exit_slices_follow_ai_then_the_schedule(tmp_path):
+    end_ts = T0 + 3 * 86_400
+    eager = CoreDecider(core="SELL_SLICE", action="SKIP")
+    engine, broker, feed = usdt_engine(tmp_path, line(270_000, 271_000), eager, engine_end_time=end_iso(end_ts))
+    await run(engine, feed, end_ts - 7 * 3600, end_ts - 6 * 3600 + 3 * 900)
+    assert engine.state["core"]["slices_done"] == 3 and eager.core_calls == 3   # AI sold one slice per bar
+    lazy = CoreDecider(core="WAIT", action="SKIP")
+    engine, broker, feed = usdt_engine(tmp_path / "b", line(270_000, 271_000), lazy, engine_end_time=end_iso(end_ts))
+    await run(engine, feed, end_ts - 7 * 3600, end_ts - 4 * 3600)
+    assert engine.state["core"]["slices_done"] == 1                              # forced by the first deadline
+    assert engine.core.slice_deadline(1) == pytest.approx(end_ts - 45 * 60 - 2 * (5.25 * 3600) / 3)

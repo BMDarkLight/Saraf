@@ -29,9 +29,11 @@ def git_commit() -> str:
 
 
 async def run_engine(s: Settings, mode: str, confirm_live: bool = False, max_loops: int | None = None,
-                     hours: float | None = None) -> None:
+                     hours: float | None = None, name: str | None = None) -> None:
     client = WallexClient(s.wallex_base_url, s.wallex_api_key, sub_account=s.wallex_sub_account_client_id)
-    out = ROOT / "data" / "engine" / mode
+    if name and (name in ("live", "shadow") or not name.replace("-", "").isalnum()):
+        raise SystemExit("--name must be a plain name other than live/shadow")
+    out = ROOT / "data" / "engine" / (name or mode)
     out.mkdir(parents=True, exist_ok=True)
     if mode == "live":
         if not (s.wallex_api_key and confirm_live):
@@ -42,11 +44,11 @@ async def run_engine(s: Settings, mode: str, confirm_live: bool = False, max_loo
                                                             "paper_usdt": 0.0}))
     journal = Journal(out, echo=True)
     fee = PAPER_FEE if mode != "live" else s.maker_fee
-    engine = Engine(s, LiveFeed(client, s), SpotExec(spot, fee), make_decider(s, s.engine_decider), journal,
+    engine = Engine(s, LiveFeed(client, s), SpotExec(spot, fee, quote=s.engine_quote), make_decider(s, s.engine_decider), journal,
                     state_path=out / "state.json")
     await engine.reconcile()
     snapshot = {k: v for k, v in s.model_dump(mode="json").items() if k.startswith(("engine_", "llm_")) and k not in SECRET_FIELDS}
-    journal.log("start", engine.feed.now(), mode=mode, commit=git_commit(), config=snapshot)
+    journal.log("start", engine.feed.now(), mode=mode, name=name or mode, commit=git_commit(), config=snapshot)
 
     tf_s = s.engine_timeframe_min * 60
     last_bar = int(engine.feed.now() // tf_s)

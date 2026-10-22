@@ -48,3 +48,14 @@ CREDIT_BLOCKED_USDT = frozenset({
 })
 
 CREDIT_BLOCKED = CREDIT_BLOCKED_TMN | CREDIT_BLOCKED_USDT
+
+
+CASH_ASSETS = ("TMN", "USDT")   # the two quote currencies; neither counts as market exposure
+
+
+def split_symbol(symbol: str) -> tuple[str, str]:
+    """BTCUSDT -> (BTC, USDT); BTCTMN -> (BTC, TMN); USDTTMN -> (USDT, TMN)."""
+    for quote in ("TMN", "USDT"):
+        if symbol.endswith(quote) and len(symbol) > len(quote):
+            return symbol[: -len(quote)], quote
+    raise ValueError(f"unknown quote currency in {symbol}")
