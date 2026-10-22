@@ -534,3 +534,4 @@ table.evidence td { padding: 6px 4px; border-bottom: 1px solid var(--border-soft
 .curve-y { position: absolute; inset-inline-end: 2px; font-size: 10px; color: var(--muted); pointer-events: none; }
 .curve-y.top { top: 20px; }
 .curve-y.bottom { bottom: 2px; }
+.strat-real { display: grid; gap: 8px; }

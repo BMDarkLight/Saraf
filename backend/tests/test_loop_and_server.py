@@ -278,3 +278,36 @@ async def test_strategy_endpoint_shows_the_core_run_next_to_live(http, tmp_path,
     assert r["end_time"].startswith("2026-10-30") and r["params"]["core_exit_slices"] == 3
     assert len(r["curve"]) >= 6 and r["curve"][-1]["equity"] == 5_050_000 and r["curve"][0]["hold_tmn"] == 5_000_000
     assert r["curve"][0]["hold_usdt"] is not None
+
+
+def test_strategy_real_switch_needs_confirmation_and_sets_the_profile(tmp_path, monkeypatch):
+    import asyncio
+    from fastapi.testclient import TestClient
+    from wallex_agent import server
+
+    calls = []
+
+    class Proc:
+        returncode = 0
+        async def communicate(self):
+            return b"", b""
+
+    async def fake_exec(*args, **kw):
+        calls.append(args)
+        return Proc()
+
+    profile = tmp_path / "data/engine/profile.env"
+    monkeypatch.setattr(server, "ENGINE_MODE_FILE", tmp_path / "data/engine/mode.env")
+    monkeypatch.setattr(server, "STRATEGY_PROFILE_FILE", profile)
+    monkeypatch.setattr(server.shutil, "which", lambda name: "/bin/systemctl")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    c = TestClient(server.app)
+    assert c.post("/api/strategy/live", json={"on": True}).status_code == 400 and not calls and not profile.exists()
+    r = c.post("/api/strategy/live", json={"on": True, "confirm": "LIVE"}).json()
+    assert r["strategy_live"] and "ENGINE_QUOTE=USDT" in profile.read_text()
+    assert "--mode live" in (tmp_path / "data/engine/mode.env").read_text() and server.ctx.spot.mode == "live"
+    assert calls[-1] == ("systemctl", "restart", "wallex-engine")
+    r = c.post("/api/strategy/live", json={"on": False}).json()
+    assert not r["strategy_live"] and not profile.exists()
+    assert "--mode live" in (tmp_path / "data/engine/mode.env").read_text()   # the app's mode stays the header's call
+    c.post("/api/engine/mode", json={"mode": "shadow"})                          # leave the app in paper mode

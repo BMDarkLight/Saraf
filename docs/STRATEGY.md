@@ -105,6 +105,7 @@ uv run python -m wallex_agent.engine backtest --days 7 --end 2026-10-22T21:00:00
 
 ## 6. Remaining steps
 
-1. Set `ENGINE_END_TIME` once the organisers publish the challenge end.
-2. Review the shadow session, then switch the live engine to this configuration (the user's call).
+1. `ENGINE_END_TIME` is set in the server .env (2026-10-24 23:59 Tehran); change it there if the organisers differ.
+2. Review the shadow session, then press «اجرای واقعی» on the strategy card: the main engine goes live with
+   `deploy/strategy.env` (copied to `data/engine/profile.env`, loaded by `wallex-engine.service`).
 3. Convert TMN↔USDT with maker limits (0.25% instead of 0.30%) to recover about 0.1%.

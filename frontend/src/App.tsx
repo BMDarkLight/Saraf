@@ -141,7 +141,7 @@ export default function App() {
           <Chat ref={chat} onTrade={() => setRefresh((x) => x + 1)} onSymbol={setSymbol} />
         </section>
         <section className={`col side-left ${tab === "trade" ? "active" : ""} ${tab !== "markets" ? "side-on" : ""}`}>
-          <Strategy />
+          <Strategy onModeChanged={reloadCfg} />
           <Portfolio refreshKey={refresh} onAsk={ask} assistantLive={cfg?.spot_mode === "live"} onModeChanged={reloadCfg} />
           <OrderBook symbol={symbol} />
           <FearGreed />

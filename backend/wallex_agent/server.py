@@ -343,19 +343,64 @@ async def set_engine_mode(body: EngineModeIn):
     systemd unit after .env) and restart the engine service. Its state resumes per mode."""
     if body.mode == "live" and body.confirm != "LIVE":
         raise HTTPException(400, "switching to live needs confirm=LIVE")
+    _need_systemd()
+    _write_mode(body.mode)
+    await _restart_engine()
+    return {"ok": True, "mode": body.mode}
+
+
+def _need_systemd() -> None:
     if not shutil.which("systemctl"):
         raise HTTPException(501, "the engine is not running as a systemd service here")
+
+
+def _write_mode(mode: str) -> None:
     ENGINE_MODE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ENGINE_MODE_FILE.write_text(f"ENGINE_RUN_ARGS={MODE_ARGS[body.mode]}\n")
+    ENGINE_MODE_FILE.write_text(f"ENGINE_RUN_ARGS={MODE_ARGS[mode]}\n")
     # the chat assistant follows the engine: real spot orders in live, paper in shadow
-    settings.spot_mode = "live" if body.mode == "live" else "paper"
-    ctx.spot = LiveSpotBroker(ctx.client) if body.mode == "live" else PaperSpotBroker(ctx.client, settings)
+    settings.spot_mode = "live" if mode == "live" else "paper"
+    ctx.spot = LiveSpotBroker(ctx.client) if mode == "live" else PaperSpotBroker(ctx.client, settings)
+
+
+async def _restart_engine() -> None:
     proc = await asyncio.create_subprocess_exec("systemctl", "restart", ENGINE_SERVICE,
                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     _, err = await proc.communicate()
     if proc.returncode:
         raise HTTPException(500, f"restart failed: {err.decode(errors='ignore')[:300]}")
-    return {"ok": True, "mode": body.mode}
+
+
+# The main engine's strategy profile: deploy/strategy.env copied here makes wallex-engine run the USDT-core strategy
+# (the unit loads it after .env and mode.env); no file = the defaults (TMN markets).
+STRATEGY_PROFILE_FILE = ROOT / "data" / "engine" / "profile.env"
+STRATEGY_ENV = ROOT / "deploy" / "strategy.env"
+
+
+def strategy_is_live() -> bool:
+    return requested_engine_mode() == "live" and STRATEGY_PROFILE_FILE.exists()
+
+
+class StrategyLiveIn(BaseModel):
+    on: bool
+    confirm: str = ""   # turning it on trades real money: must be "LIVE"
+
+
+@app.post("/api/strategy/live")
+async def set_strategy_live(body: StrategyLiveIn):
+    """Run the strategy for real: the main engine switches to live with the strategy's settings (it then converts
+    free TMN to USDT and trades the satellite on the real account). Off: the main engine drops the profile and keeps
+    its current mode. The shadow strategy session keeps running either way."""
+    if body.on and body.confirm != "LIVE":
+        raise HTTPException(400, "running the strategy for real needs confirm=LIVE")
+    _need_systemd()
+    if body.on:
+        STRATEGY_PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        STRATEGY_PROFILE_FILE.write_text(STRATEGY_ENV.read_text())
+        _write_mode("live")
+    else:
+        STRATEGY_PROFILE_FILE.unlink(missing_ok=True)
+    await _restart_engine()
+    return {"ok": True, "strategy_live": strategy_is_live()}
 
 
 _key_check: dict = {"at": 0.0, "main": None}
@@ -428,7 +473,7 @@ async def strategy():
     # the run with the USDT core is the strategy; prefer the app's own mode when both have it
     mode = next((m for m in runs if (engine_status(m) or {}).get("core")), runs[0] if runs else None)
     if not mode:
-        return {"engine": None}
+        return {"engine": None, "strategy_live": strategy_is_live()}
     eng = engine_status(mode)
     start = _last_start(engine_dir(mode))
     cfg = start.get("config") or {}
@@ -455,7 +500,7 @@ async def strategy():
     capital = eng["capital_tmn"]
     first = pts[0][1] if pts else capital
     return {
-        "mode": start.get("mode") or mode, "run": mode, "engine": eng, "quote": cfg.get("engine_quote", "TMN"), "started": start.get("time"),
+        "mode": start.get("mode") or mode, "run": mode, "engine": eng, "strategy_live": strategy_is_live(), "quote": cfg.get("engine_quote", "TMN"), "started": start.get("time"),
         "end_time": cfg.get("engine_end_time") or settings.engine_end_time or None,
         "params": {k.removeprefix("engine_"): cfg.get(k) for k in (
             "engine_max_exposure_pct", "engine_max_position_pct", "engine_max_positions", "engine_risk_per_trade_pct",

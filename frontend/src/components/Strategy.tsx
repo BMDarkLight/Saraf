@@ -4,18 +4,17 @@ import { compact, pct, price, tone } from "../format";
 
 /** The strategy (docs/STRATEGY.md) as it runs: phase, where the money is, the gate, the exit schedule,
  *  equity vs two benchmarks, and the evidence each piece rests on. */
-export function Strategy() {
+export function Strategy({ onModeChanged }: { onModeChanged?: () => void }) {
   const [d, setD] = useState<any>(null);
   const [view, setView] = useState<"now" | "evidence">("now");
   const [now, setNow] = useState(Date.now());
 
+  const load = () => getJSON("/api/strategy").then(setD).catch(() => {});
   useEffect(() => {
-    let live = true;
-    const load = () => getJSON("/api/strategy").then((x) => live && setD(x)).catch(() => {});
     load();
     const t = setInterval(load, 30000);
     const c = setInterval(() => setNow(Date.now()), 1000);
-    return () => { live = false; clearInterval(t); clearInterval(c); };
+    return () => { clearInterval(t); clearInterval(c); };
   }, []);
 
   const e = d?.engine;
@@ -31,10 +30,62 @@ export function Strategy() {
         </div>
       </div>
       <div className="card-b strat">
+        {d && <RealSwitch on={!!d.strategy_live} onChanged={() => {
+          onModeChanged?.();
+          for (const ms of [0, 5000, 15000, 30000]) setTimeout(load, ms);   // the engine restarts in the new mode
+        }} />}
         {view === "evidence" ? <Evidence /> : !d ? <div className="muted">در حال بارگذاری…</div>
           : !e ? <div className="muted">موتور هنوز اجرا نشده است.</div>
           : <Now d={d} now={now} />}
       </div>
+    </div>
+  );
+}
+
+/** Runs the strategy for real: the main engine goes live with the strategy's settings. Asks first, both ways. */
+function RealSwitch({ on, onChanged }: { on: boolean; onChanged: () => void }) {
+  const [ask, setAsk] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const apply = async () => {
+    setBusy(true); setErr("");
+    try {
+      const r = await fetch("/api/strategy/live", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ on: !on, confirm: on ? "" : "LIVE" }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`);
+      setAsk(false);
+      onChanged();
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <div className="strat-real">
+      <div className="seg mode-switch" role="radiogroup" aria-label="اجرای استراتژی">
+        <button role="radio" aria-checked={!on} className={!on ? "on" : ""} onClick={() => on && setAsk(true)}>
+          <span className="dot" />اجرای شبیه‌سازی</button>
+        <button role="radio" aria-checked={on} className={on ? "on live" : ""} onClick={() => !on && setAsk(true)}>
+          <span className="dot" />اجرای واقعی</button>
+      </div>
+      {ask && (
+        <div className={`mode-confirm ${on ? "" : "live"}`} role="dialog">
+          {on ? (
+            <p>اجرای واقعی استراتژی متوقف شود؟ موتور به تنظیمات پیش‌فرض برمی‌گردد و حالت برنامه (بالای صفحه) تغییر
+              نمی‌کند. تتر خریده‌شده فروخته نمی‌شود.</p>
+          ) : (
+            <p><b>استراتژی با پول واقعی اجرا شود؟</b> موتور روی حساب اعتبار معاملاتی تومان آزاد را به تتر تبدیل می‌کند،
+              ماهواره در بازارهای تتری معامله می‌کند و پیش از پایان چالش همه چیز به تومان برمی‌گردد. کل برنامه هم واقعی
+              می‌شود.</p>
+          )}
+          {err && <div className="err-box" style={{ margin: "0 0 8px" }}>{err}</div>}
+          <div className="mode-confirm-actions">
+            <button className={`btn ${on ? "primary" : "danger"}`} disabled={busy} onClick={apply}>
+              {busy ? "…" : on ? "توقف اجرای واقعی" : "بله، اجرای واقعی"}
+            </button>
+            <button className="btn ghost" onClick={() => { setAsk(false); setErr(""); }}>انصراف</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
