@@ -531,3 +531,6 @@ table.evidence td { padding: 6px 4px; border-bottom: 1px solid var(--border-soft
 .verdict.keep { background: var(--up-soft); color: var(--up); }
 .verdict.drop { background: var(--down-soft); color: var(--down); }
 .verdict.small { background: var(--warn-soft); color: var(--warn); }
+.curve-y { position: absolute; inset-inline-end: 2px; font-size: 10px; color: var(--muted); pointer-events: none; }
+.curve-y.top { top: 20px; }
+.curve-y.bottom { bottom: 2px; }

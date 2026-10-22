@@ -157,13 +157,15 @@ function Curve({ rows }: { rows: any[] }) {
   const W = 320, H = 120, pad = { l: 4, r: 4, t: 8, b: 8 };
   const geo = useMemo(() => {
     const vals = rows.flatMap((r) => [r.equity, r.hold_usdt, r.hold_tmn].filter((v) => v != null));
-    let lo = Math.min(...vals), hi = Math.max(...vals);
-    if (hi - lo < lo * 0.002) { lo -= lo * 0.001; hi += hi * 0.001; }
+    // at least +-1% around the start, so fees and noise don't look like a crash
+    const base = rows[0].equity;
+    let lo = Math.min(...vals, base * 0.99), hi = Math.max(...vals, base * 1.01);
     const t0 = rows[0].t, t1 = rows[rows.length - 1].t || t0 + 1;
     const x = (t: number) => pad.l + ((t - t0) / Math.max(1, t1 - t0)) * (W - pad.l - pad.r);
     const y = (v: number) => pad.t + (1 - (v - lo) / (hi - lo)) * (H - pad.t - pad.b);
     const path = (k: string) => rows.filter((r) => r[k] != null).map((r, i) => `${i ? "L" : "M"}${x(r.t).toFixed(1)},${y(r[k]).toFixed(1)}`).join("");
-    return { x, y, eq: path("equity"), usdt: path("hold_usdt"), tmn: path("hold_tmn") };
+    const lab = (v: number) => pct((100 * (v - base)) / base, 1);
+    return { x, y, eq: path("equity"), usdt: path("hold_usdt"), tmn: path("hold_tmn"), top: lab(hi), bottom: lab(lo) };
   }, [rows]);
   const h = hover != null ? rows[hover] : null;
   const move = (ev: React.PointerEvent<SVGSVGElement>) => {
@@ -187,6 +189,8 @@ function Curve({ rows }: { rows: any[] }) {
         <path d={geo.eq} className="ln-eq" vectorEffect="non-scaling-stroke" />
         {h && <line x1={geo.x(h.t)} x2={geo.x(h.t)} y1={0} y2={H} className="xhair" vectorEffect="non-scaling-stroke" />}
       </svg>
+      <span className="curve-y top num">{geo.top}</span>
+      <span className="curve-y bottom num">{geo.bottom}</span>
       {h && (
         <div className="curve-tip num">
           <div className="muted">{hhmm(h.t * 1000)}</div>
