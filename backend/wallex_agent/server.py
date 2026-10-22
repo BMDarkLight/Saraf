@@ -435,7 +435,7 @@ async def strategy():
     rows = []
     with contextlib.suppress(OSError):
         rows = [r.split(",") for r in (engine_dir(mode) / "equity.csv").read_text().strip().splitlines()[1:]]
-    if start.get("ts"):   # this session only: earlier runs of the same mode used other settings
+    if start.get("ts") and mode != STRATEGY_RUN:   # its own dir spans restarts; live/shadow dirs saw other setups
         rows = [r for r in rows if float(r[0]) >= start["ts"] - 60] or rows[-1:]
     step = max(1, len(rows) // 240)
     pts = [(int(r[0]), float(r[1])) for r in rows[::step]]
