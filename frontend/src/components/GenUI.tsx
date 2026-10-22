@@ -39,7 +39,7 @@ function useChart(build: (c: IChartApi) => (() => void) | void, deps: unknown[],
 function Frame({ title, children, wide }: { title: React.ReactNode; children: React.ReactNode; wide?: boolean }) {
   return (
     <div className="widget genui" style={{ maxWidth: wide ? 720 : 520 }}>
-      <div className="widget-h"><span className="genui-tag">UI</span>{title}</div>
+      <div className="widget-h"><span className="genui-tag">رابط</span>{title}</div>
       {children}
     </div>
   );

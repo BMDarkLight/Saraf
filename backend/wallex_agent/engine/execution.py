@@ -53,6 +53,10 @@ class SpotExec:
     async def holding_total(self, asset: str) -> float:
         return (await self.spot.balances()).get(asset, {}).get("total", 0.0)
 
+    async def all_holdings(self) -> dict[str, float]:
+        """Every non-TMN asset in the account (total), including ones the engine didn't buy."""
+        return {a: b.get("total", 0.0) for a, b in (await self.spot.balances()).items() if a != "TMN"}
+
     # ---- limit (maker) orders
     async def place_limit(self, symbol: str, side: str, qty: float, price: float, base: str) -> str:
         order = await self.spot.place_order(symbol, side, "LIMIT", quantity=qty, price=price)

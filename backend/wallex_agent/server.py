@@ -28,6 +28,10 @@ from .news import web
 from .wallex import WallexError
 
 settings = get_settings()
+# the UI's assistant switch (test/real spot) survives restarts and deploys in data/
+ASSISTANT_MODE_FILE = ROOT / "data" / "assistant_mode.json"
+with contextlib.suppress(OSError, ValueError, KeyError):
+    settings.spot_mode = json.loads(ASSISTANT_MODE_FILE.read_text())["spot"]
 ctx = AppContext.build(settings)
 agent = Agent(ctx)
 futures_events: collections.deque = collections.deque(maxlen=50)
@@ -331,6 +335,26 @@ async def set_engine_mode(body: EngineModeIn):
     return {"ok": True, "mode": body.mode}
 
 
+class AssistantModeIn(BaseModel):
+    spot: Literal["live", "paper"]
+    confirm: str = ""
+
+
+@app.post("/api/assistant/mode")
+async def set_assistant_mode(body: AssistantModeIn):
+    """Switch the chat assistant's spot trading between paper and the real (trade-credit) account, in
+    place: every chat trade still needs the user's approval on its confirmation card."""
+    if body.spot == "live" and body.confirm != "LIVE":
+        raise HTTPException(400, "switching to live needs confirm=LIVE")
+    if body.spot == "live" and not settings.wallex_api_key:
+        raise HTTPException(400, "WALLEX_API_KEY is not set")
+    settings.spot_mode = body.spot
+    ctx.spot = LiveSpotBroker(ctx.client) if body.spot == "live" else PaperSpotBroker(ctx.client, settings)
+    ASSISTANT_MODE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ASSISTANT_MODE_FILE.write_text(json.dumps({"spot": body.spot}))
+    return {"ok": True, "spot": body.spot}
+
+
 @app.get("/api/account")
 async def account():
     """The real Wallex account (trade-credit sub-account when configured), read-only, plus the engine."""
@@ -388,12 +412,12 @@ async def submit_ticket(t: TicketIn):
     if t.market == "spot":
         name = "spot_place_order"
         args = {"symbol": t.symbol, "side": t.side, "type": t.order_type, "quote_amount": t.amount,
-                "price": t.price, "reason": "submitted from trade ticket"}
+                "price": t.price, "reason": "ثبت‌شده از برگه سفارش"}
     else:
         name = "futures_open_position"
         args = {"symbol": t.symbol, "side": t.side, "leverage": t.leverage, "margin": t.amount,
                 "order_type": t.order_type, "price": t.price, "take_profit": t.take_profit,
-                "stop_loss": t.stop_loss, "reason": "submitted from trade ticket"}
+                "stop_loss": t.stop_loss, "reason": "ثبت‌شده از برگه سفارش"}
     ok, result, confirm = await agent.run_tool(name, json.dumps(args), agent.session(t.session_id))
     return {"ok": ok, "result": result, "action": confirm}
 

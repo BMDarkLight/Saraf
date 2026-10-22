@@ -91,6 +91,16 @@ class Engine:
             else:
                 qty = sum(p["qty"] for p in self.positions.values() if p["base"] == base)
             exposure += qty * (await self.feed.quote(symbol))["bid"]
+        # Coins the engine doesn't manage (e.g. bought through the chat assistant on the same account)
+        # still count: otherwise converting TMN by hand looks like a crash and trips the drawdown stop.
+        if hasattr(self.broker, "all_holdings"):
+            for asset, qty in (await self.broker.all_holdings()).items():
+                if asset in symbols or qty <= 0:
+                    continue
+                try:
+                    exposure += qty * (await self.feed.quote(f"{asset}TMN"))["bid"]
+                except Exception:   # no TMN market for it: can't value it, leave it out
+                    pass
         return cash + exposure, cash, exposure
 
     async def reconcile(self) -> None:
@@ -185,8 +195,10 @@ class Engine:
         breadth = ctx.get("breadth_pct_up_24h")
         if breadth is not None and breadth < self.s.engine_breadth_gate_pct and regime != "risk_off":
             # hard rule: the decider may be stricter than the breadth gate, never looser
-            regime, reason = "risk_off", (f"breadth gate: only {breadth}% of markets up over 24h "
-                                          f"(< {self.s.engine_breadth_gate_pct:g}%); decider said {d.payload['regime']}")
+            regime_fa = {"risk_on": "ریسک‌پذیر", "neutral": "خنثی", "risk_off": "ریسک‌گریز"}
+            regime, reason = "risk_off", (f"قانون فراگیری بازار: فقط {breadth}٪ بازارها در ۲۴ ساعت مثبت‌اند "
+                                          f"(کمتر از {self.s.engine_breadth_gate_pct:g}٪)، پس خرید جدید ممنوع است؛ "
+                                          f"نظر هوش مصنوعی: {regime_fa.get(d.payload['regime'], d.payload['regime'])}")
         self.state.update(regime=regime, regime_reason=reason, regime_at=now)
         self.journal.log("regime", now, regime=regime, decider_regime=d.payload["regime"], reason=reason,
                          source=d.source, prompt_hash=d.prompt_hash, error=d.error, context=ctx)

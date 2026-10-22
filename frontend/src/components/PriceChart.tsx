@@ -42,7 +42,7 @@ export function PriceChart({ symbol, theme }: { symbol: string; theme: string })
   }, [symbol, res, theme]);
 
   return (
-    <div className="card">
+    <div className="card chart-card">
       <div className="card-h">
         <span className="ltr">{symbol}</span>
         <span className="spacer" />

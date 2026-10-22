@@ -276,3 +276,21 @@ async def test_client_sends_sub_account_header_on_auth_calls():
     c._http = httpx.AsyncClient(base_url="https://x", transport=httpx.MockTransport(handler))
     await c.balances()
     assert seen[0]["x-api-key"] == "k" and seen[0]["sub-account-client-id"] == "SUB-1"
+
+
+async def test_equity_counts_coins_the_engine_did_not_buy(tmp_path):
+    """Converting TMN by hand (chat assistant, same account) must not look like a crash to the drawdown stop."""
+    from types import SimpleNamespace as NS
+    fake = FakeClient()
+    s = make_settings(tmp_path, paper_tmn=5_000_000, paper_usdt=0)
+    ex = SpotExec(PaperSpotBroker(fake, s))
+    await ex.spot.place_order("BTCTMN", "BUY", "MARKET", quote_amount=4_000_000)   # not an engine position
+
+    class Feed:
+        async def quote(self, symbol):
+            bid, ask = fake._bid_ask(symbol)
+            return {"bid": bid, "ask": ask, "last": fake.prices[symbol]}
+
+    eq, cash, exposure = await Engine.equity(NS(broker=ex, feed=Feed(), positions={}, pending={}))
+    assert cash < 1_100_000
+    assert eq > 4_950_000          # only fees and half the spread are gone, not 80% of the account

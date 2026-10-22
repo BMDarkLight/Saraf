@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { getJSON } from "../api";
 import { compact, pct, price, tone } from "../format";
 
-export function Portfolio({ refreshKey, onAsk }: { refreshKey: number; onAsk: (text: string) => void }) {
+export function Portfolio({ refreshKey, onAsk, assistantLive }: { refreshKey: number; onAsk: (text: string) => void; assistantLive?: boolean }) {
   const [tab, setTab] = useState<"account" | "futures" | "spot">("account");
   const [d, setD] = useState<any>(null);
   const [acc, setAcc] = useState<any>(null);
@@ -33,7 +33,7 @@ export function Portfolio({ refreshKey, onAsk }: { refreshKey: number; onAsk: (t
         <span className="spacer" />
         <div className="seg">
           <button className={tab === "account" ? "on" : ""} onClick={() => setTab("account")}>حساب والکس</button>
-          <button className={tab === "spot" ? "on" : ""} onClick={() => setTab("spot")}>اسپات آزمایشی</button>
+          {!assistantLive && <button className={tab === "spot" ? "on" : ""} onClick={() => setTab("spot")}>اسپات آزمایشی</button>}
           <button className={tab === "futures" ? "on" : ""} onClick={() => setTab("futures")}>فیوچرز آزمایشی</button>
         </div>
       </div>

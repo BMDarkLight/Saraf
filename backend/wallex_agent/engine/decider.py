@@ -136,9 +136,9 @@ stop_atr/target_atr: distances in ATRs from entry (defaults 2.5 / 3.5 work well)
 Respond with ONE JSON object only, no prose, matching the requested schema."""
 
 ENTRY_SCHEMA = ('{"action": "TAKE"|"SKIP", "confidence": 0..1, "size_fraction": 0..1, '
-                '"stop_atr": 0.8..3.0, "target_atr": 1.2..6.0, "reasoning": "<=2 sentences"}')
-REVIEW_SCHEMA = '{"action": "HOLD"|"EXIT"|"TIGHTEN", "new_stop": number|null, "reasoning": "<=2 sentences"}'
-REGIME_SCHEMA = '{"regime": "risk_on"|"neutral"|"risk_off", "reasoning": "<=2 sentences"}'
+                '"stop_atr": 0.8..3.0, "target_atr": 1.2..6.0, "reasoning": "<=2 sentences, in Persian (Farsi)"}')
+REVIEW_SCHEMA = '{"action": "HOLD"|"EXIT"|"TIGHTEN", "new_stop": number|null, "reasoning": "<=2 sentences, in Persian (Farsi)"}'
+REGIME_SCHEMA = '{"regime": "risk_on"|"neutral"|"risk_off", "reasoning": "<=2 sentences, in Persian (Farsi)"}'
 
 
 def _extract_json(text: str) -> dict:

@@ -322,10 +322,22 @@ class SpotOrderArgs(BaseModel):
     reason: str = Field(description="one-line rationale shown to the user")
 
 
+_QUOTE_FA = {"TMN": "تومان", "USDT": "تتر"}
+
+
+def _num(x: float) -> str:
+    return f"{x:,.0f}" if abs(x) >= 1000 else f"{x:,.8g}"
+
+
 def _spot_summary(a: SpotOrderArgs) -> str:
-    amt = f"{a.quantity:g} base" if a.quantity is not None else f"{a.quote_amount:g} quote"
-    px = f" @ {a.price:g}" if a.type == "LIMIT" and a.price else ""
-    return f"SPOT {a.side} {a.symbol.upper()} {a.type} {amt}{px}"
+    sym = a.symbol.upper()
+    quote = next((q for q in _QUOTE_FA if sym.endswith(q)), "")
+    base = sym[: -len(quote)] if quote else sym
+    kind = {"MARKET": "بازار", "LIMIT": "محدود"}.get(a.type, a.type)
+    side = "خرید" if a.side == "BUY" else "فروش"
+    amt = f"{_num(a.quantity)} {base}" if a.quantity is not None else f"{_num(a.quote_amount)} {_QUOTE_FA.get(quote, quote)}"
+    px = f" با قیمت {_num(a.price)}" if a.type == "LIMIT" and a.price else ""
+    return f"{side} {kind} {sym} — {amt}{px}"
 
 
 @tool("spot_place_order", "Place a spot BUY/SELL order (MARKET or LIMIT). Requires user confirmation.",
@@ -339,7 +351,7 @@ class CancelArgs(BaseModel):
 
 
 @tool("spot_cancel_order", "Cancel an active spot order.", CancelArgs, mutating=True,
-      summarize=lambda a: f"Cancel spot order {a.order_id}")
+      summarize=lambda a: f"لغو سفارش اسپات {a.order_id}")
 async def spot_cancel_order(ctx: AppContext, a: CancelArgs):
     return await ctx.spot.cancel_order(a.order_id)
 
@@ -351,7 +363,7 @@ class SellAllArgs(BaseModel):
 
 
 @tool("spot_close_asset", "Close a spot holding: market-sell the entire free balance of an asset.", SellAllArgs,
-      mutating=True, summarize=lambda a: f"SPOT market-sell ALL free {a.asset.upper()} to {a.quote}")
+      mutating=True, summarize=lambda a: f"فروش کل {a.asset.upper()} آزاد به {_QUOTE_FA.get(a.quote, a.quote)}")
 async def spot_close_asset(ctx: AppContext, a: SellAllArgs):
     bals = await ctx.spot.balances()
     free = bals.get(a.asset.upper(), {}).get("free", 0)
@@ -374,10 +386,12 @@ class FuturesOpenArgs(BaseModel):
 
 
 def _fut_summary(a: FuturesOpenArgs) -> str:
-    size = f"margin {a.margin:g}" if a.margin is not None else f"qty {a.quantity:g}"
-    extra = "".join([f" TP {a.take_profit:g}" if a.take_profit else "", f" SL {a.stop_loss:g}" if a.stop_loss else ""])
-    px = f" @ {a.price:g}" if a.order_type == "LIMIT" and a.price else ""
-    return f"FUTURES {a.side} {a.symbol.upper()} x{a.leverage:g} {a.order_type} {size}{px}{extra}"
+    side = "لانگ" if a.side == "LONG" else "شورت"
+    size = f"مارجین {_num(a.margin)}" if a.margin is not None else f"مقدار {_num(a.quantity)}"
+    extra = "".join([f" · حد سود {_num(a.take_profit)}" if a.take_profit else "",
+                     f" · حد ضرر {_num(a.stop_loss)}" if a.stop_loss else ""])
+    px = f" با قیمت {_num(a.price)}" if a.order_type == "LIMIT" and a.price else ""
+    return f"فیوچرز {side} {a.symbol.upper()} اهرم {a.leverage:g}× — {size}{px}{extra}"
 
 
 @tool("futures_open_position", "Open a leveraged LONG/SHORT futures position (isolated margin). "
@@ -395,7 +409,7 @@ class FuturesCloseArgs(BaseModel):
 
 
 @tool("futures_close_position", "Close all or part of a futures position at market.", FuturesCloseArgs,
-      mutating=True, summarize=lambda a: f"FUTURES close {a.fraction:.0%} of {a.position_id}")
+      mutating=True, summarize=lambda a: f"بستن {a.fraction:.0%} پوزیشن {a.position_id}")
 async def futures_close_position(ctx: AppContext, a: FuturesCloseArgs):
     return await ctx.futures.close_position(a.position_id, a.fraction)
 
@@ -407,13 +421,13 @@ class TPSLArgs(BaseModel):
 
 
 @tool("futures_set_tp_sl", "Set or change take-profit / stop-loss of a futures position.", TPSLArgs,
-      mutating=True, summarize=lambda a: f"FUTURES set TP={a.take_profit} SL={a.stop_loss} on {a.position_id}")
+      mutating=True, summarize=lambda a: f"تنظیم حد سود {a.take_profit} و حد ضرر {a.stop_loss} برای {a.position_id}")
 async def futures_set_tp_sl(ctx: AppContext, a: TPSLArgs):
     return await ctx.futures.set_tp_sl(a.position_id, a.take_profit, a.stop_loss)
 
 
 @tool("futures_cancel_order", "Cancel a pending futures limit order.", CancelArgs, mutating=True,
-      summarize=lambda a: f"Cancel futures order {a.order_id}")
+      summarize=lambda a: f"لغو سفارش فیوچرز {a.order_id}")
 async def futures_cancel_order(ctx: AppContext, a: CancelArgs):
     return await ctx.futures.cancel_order(a.order_id)
 

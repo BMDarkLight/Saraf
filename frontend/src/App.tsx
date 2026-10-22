@@ -25,6 +25,51 @@ function initialTheme(): string {
   try { return localStorage.getItem("theme") || "auto"; } catch { return "auto"; }
 }
 
+/** Header chip that switches the chat assistant's spot trades between test and the real credit account. */
+function AssistantSwitch({ live, onChanged }: { live: boolean; onChanged: (spot: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const apply = async (spot: "live" | "paper") => {
+    setBusy(true); setErr("");
+    try {
+      const r = await fetch("/api/assistant/mode", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spot, confirm: spot === "live" ? "LIVE" : "" }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`);
+      onChanged(spot);
+      setOpen(false);
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <span className="mode-pop-wrap">
+      <button className={`chip chip-btn ${live ? "live" : ""}`} aria-expanded={open} onClick={() => setOpen(!open)}
+        title="حالت معاملات دستیار چت؛ برای تغییر کلیک کنید">
+        <span className="dot" />دستیار: {live ? "واقعی" : "آزمایشی"}
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+      </button>
+      {open && (
+        <div className={`mode-pop mode-confirm ${live ? "" : "live"}`} role="dialog">
+          {live ? (
+            <p>معاملاتی که از چت تأیید می‌کنید الان <b>واقعی</b> و روی حساب اعتبار معاملاتی اجرا می‌شوند. برگردد به آزمایشی؟</p>
+          ) : (
+            <p><b>معاملات واقعی از چت.</b> هر معامله‌ای که در کارت تأیید قبول کنید روی حساب اعتبار معاملاتی (همان حساب موتور)
+              با پول واقعی اجرا می‌شود. فیوچرز آزمایشی می‌ماند؛ حساب اعتباری فقط اسپات است.</p>
+          )}
+          {err && <div className="err-box" style={{ margin: "0 0 8px" }}>{err}</div>}
+          <div className="mode-confirm-actions">
+            <button className={`btn ${live ? "primary" : "danger"}`} disabled={busy} onClick={() => apply(live ? "paper" : "live")}>
+              {busy ? "…" : live ? "برگشت به آزمایشی" : "بله، معاملات چت واقعی شود"}
+            </button>
+            <button className="btn ghost" onClick={() => setOpen(false)}>انصراف</button>
+          </div>
+        </div>
+      )}
+    </span>
+  );
+}
+
 export default function App() {
   const [symbol, setSymbol] = useState("BTCUSDT");
   const [cfg, setCfg] = useState<any>(null);
@@ -58,12 +103,7 @@ export default function App() {
                 <span className="dot" />موتور: {cfg.engine_mode === "live" ? "زنده" : "شبیه‌سازی"}
               </span>
             )}
-            <span
-              className={`chip hide-xs ${cfg.spot_mode === "live" || cfg.futures_mode === "live" ? "live" : ""}`}
-              title={`معاملات دستیار چت — اسپات: ${cfg.spot_mode === "live" ? "واقعی" : "آزمایشی"}، فیوچرز: ${cfg.futures_mode === "live" ? "واقعی" : "آزمایشی"}`}
-            >
-              <span className="dot" />دستیار: {cfg.spot_mode === "live" ? "واقعی" : "آزمایشی"}
-            </span>
+            <AssistantSwitch live={cfg.spot_mode === "live"} onChanged={(spot) => setCfg({ ...cfg, spot_mode: spot })} />
             <span className="chip hide-sm ltr">{cfg.model}</span>
           </>
         )}
@@ -83,28 +123,29 @@ export default function App() {
       <main className="layout">
         <div className="seg side-switch" role="tablist" aria-label="پنل کناری">
           <button className={tab === "markets" ? "on" : ""} onClick={() => setTab("markets")}>بازارها</button>
-          <button className={tab !== "markets" ? "on" : ""} onClick={() => setTab("trade")}>نمودار و پورتفو</button>
+          <button className={tab !== "markets" ? "on" : ""} onClick={() => setTab("trade")}>پورتفو و عمق بازار</button>
         </div>
         <section className={`col markets-col ${tab === "markets" ? "active side-on" : ""}`}>
-          {/* below desktop the chart sits on another tab: jump there so the pick is visible */}
+          {/* on phones the chart sits under the list: bring it into view on a pick */}
           <Markets selected={symbol} onSelect={(s) => {
             setSymbol(s);
-            if (matchMedia("(max-width: 1180px)").matches) setTab("trade");
+            if (matchMedia("(max-width: 820px)").matches)
+              setTimeout(() => document.querySelector(".chart-card")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
           }} />
-          <FearGreed />
+          <PriceChart symbol={symbol} theme={String(dark)} />
         </section>
         <section className={`col chat-col ${tab === "chat" ? "active" : ""}`}>
           <Chat ref={chat} onTrade={() => setRefresh((x) => x + 1)} onSymbol={setSymbol} />
         </section>
         <section className={`col side-left ${tab === "trade" ? "active" : ""} ${tab !== "markets" ? "side-on" : ""}`}>
-          <Portfolio refreshKey={refresh} onAsk={ask} />
-          <PriceChart symbol={symbol} theme={String(dark)} />
+          <Portfolio refreshKey={refresh} onAsk={ask} assistantLive={cfg?.spot_mode === "live"} />
           <OrderBook symbol={symbol} />
+          <FearGreed />
         </section>
       </main>
       <AlertToasts onAsk={ask} />
       <nav className="mobile-tabs">
-        {([["markets", "بازارها"], ["chat", "ایجنت"], ["trade", "نمودار و پورتفو"]] as const).map(([k, l]) => (
+        {([["markets", "بازار و نمودار"], ["chat", "ایجنت"], ["trade", "پورتفو"]] as const).map(([k, l]) => (
           <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)} aria-current={tab === k ? "page" : undefined}>
             {TAB_ICONS[k]}
             {l}
