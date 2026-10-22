@@ -70,7 +70,7 @@ function Now({ d, now }: { d: any; now: number }) {
       ) : (
         <div className="warn-line">این اجرا روی بازارهای تومانی است؛ استراتژی پیشنهادی (هسته تتری) در اجرای شبیه‌سازی است.</div>
       )}
-      {usdtMode && <div className="strat-status"><b>{CORE_FA[status] ?? status}</b>{core?.entry_rate ? <span className="muted num"> · میانگین خرید تتر {price(core.entry_rate)}</span> : null}</div>}
+      {usdtMode && <div className="strat-status"><b>{CORE_FA[status] ?? status}</b>{core?.entry_rate ? <span className="muted"> — میانگین خرید تتر <bdi className="num">{price(core.entry_rate)}</bdi> تومان</span> : null}</div>}
 
       <div className="alloc" role="img" aria-label="ترکیب سرمایه">
         {parts.map(([l, v, k]) => eq > 0 && (v as number) / eq > 0.005 && (
@@ -89,7 +89,8 @@ function Now({ d, now }: { d: any; now: number }) {
         <div><span>تا پایان چالش</span><b>{end ? countdown(end - now) : "تنظیم نشده"}</b></div>
       </div>
 
-      {d.curve?.length > 1 && <Curve rows={d.curve} />}
+      {d.curve?.length > 1 ? <Curve rows={d.curve} />
+        : <div className="muted empty-line">نمودار ارزش با ثبت‌های ۵ دقیقه‌ای ساخته می‌شود.</div>}
 
       <div className="eng-regime">
         <span className="muted">دروازه خرید ماهواره: </span>

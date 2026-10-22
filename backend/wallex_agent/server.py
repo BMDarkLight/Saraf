@@ -438,7 +438,9 @@ async def strategy():
     if start.get("ts"):   # this session only: earlier runs of the same mode used other settings
         rows = [r for r in rows if float(r[0]) >= start["ts"] - 60] or rows[-1:]
     step = max(1, len(rows) // 240)
-    pts = [(int(r[0]), float(r[1])) for r in rows[::step]] + ([(int(rows[-1][0]), float(rows[-1][1]))] if rows else [])
+    pts = [(int(r[0]), float(r[1])) for r in rows[::step]]
+    if rows and (len(rows) - 1) % step:   # always end on the newest mark
+        pts.append((int(rows[-1][0]), float(rows[-1][1])))
     usdt = []
     if pts:
         with contextlib.suppress(Exception):   # the benchmark is optional; the panel works without it
