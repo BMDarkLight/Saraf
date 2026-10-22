@@ -28,8 +28,9 @@ from . import risk
 from .context import AppContext
 from .prompts import system_prompt
 from .tools import TOOLS, openai_tools
+from .toolsets import select_tools
 
-MAX_TOOL_RESULT_CHARS = 12_000
+MAX_TOOL_RESULT_CHARS = 6_000   # every result is resent on each later step of the turn
 TOOL_TIMEOUT = 45.0          # seconds; a stuck network call must not freeze the whole turn
 ACTION_TTL = 600.0           # seconds a trade confirmation stays approvable
 
@@ -250,8 +251,11 @@ class Agent:
         s = self.ctx.settings
         if s.llm_compat_schemas:
             messages = compat_history(messages)
-        kwargs = dict(model=s.llm_model, messages=messages, tools=openai_tools(s.llm_compat_schemas),
+        names = select_tools(list(TOOLS), messages)
+        kwargs = dict(model=s.llm_model, messages=messages, tools=openai_tools(s.llm_compat_schemas, names),
                       temperature=s.llm_temperature)
+        if s.llm_max_output_tokens:
+            kwargs["max_completion_tokens"] = s.llm_max_output_tokens
         if not s.llm_stream:
             resp = await self.llm.chat.completions.create(**kwargs)
             m = resp.choices[0].message

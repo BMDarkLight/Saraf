@@ -452,8 +452,8 @@ async def cancel_price_alert(ctx: AppContext, a: AlertIdArgs):
     return ctx.alerts.cancel(a.alert_id) or {"error": "alert not found"}
 
 
-def openai_tools(compat: bool = False) -> list[dict]:
-    return [t.schema(compat) for t in TOOLS.values()]
+def openai_tools(compat: bool = False, names: list[str] | None = None) -> list[dict]:
+    return [t.schema(compat) for n, t in TOOLS.items() if names is None or n in names]
 
 
 from . import genui  # noqa: E402,F401  (registers the generative UI tools)

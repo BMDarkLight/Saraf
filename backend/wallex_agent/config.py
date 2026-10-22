@@ -20,9 +20,12 @@ class Settings(BaseSettings):
     # For strict local chat templates (e.g. Gemma in LM Studio): no enum/anyOf in tool schemas and
     # tool history sent as plain text instead of role:tool messages
     llm_compat_schemas: bool = False
-    agent_max_steps: int = 12
-    # Conversation history sent to the LLM (chars); older turns are dropped. Lower it for small local models.
-    agent_history_chars: int = 60_000
+    agent_max_steps: int = 8
+    # Conversation history sent to the LLM (chars); older turns are dropped. Every step of a turn resends
+    # it, so this is the main cost lever on paid APIs.
+    agent_history_chars: int = 24_000
+    # Cap on each chat reply (max_completion_tokens); 0 = provider default
+    llm_max_output_tokens: int = 1500
 
     # Wallex
     wallex_base_url: str = "https://api.wallex.ir"
@@ -52,6 +55,9 @@ class Settings(BaseSettings):
     engine_mode: Literal["backtest", "shadow", "live"] = "shadow"
     engine_decider: Literal["ai", "rules"] = "ai"       # "rules" = baseline without the LLM
     engine_llm_model: str = ""                          # defaults to llm_model
+    # Separate endpoint/key for the engine so chat usage can't exhaust the trading engine's budget
+    engine_llm_base_url: str = ""                       # defaults to llm_base_url
+    engine_llm_api_key: str = ""                        # defaults to llm_api_key
     # JSON merged into the LLM request body. Thinking models must answer directly, e.g. for Qwen on
     # GapGPT: {"reasoning_effort": "none"} (otherwise its reasoning eats the token budget: no answer)
     engine_llm_extra_body: str = ""

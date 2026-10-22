@@ -16,7 +16,7 @@ from .execution import SpotExec
 from .feeds import LiveFeed
 from .journal import Journal
 
-SECRET_FIELDS = {"llm_api_key", "wallex_api_key", "tavily_api_key"}
+SECRET_FIELDS = {"llm_api_key", "engine_llm_api_key", "wallex_api_key", "tavily_api_key", "wallex_sub_account_client_id"}
 
 
 def git_commit() -> str:

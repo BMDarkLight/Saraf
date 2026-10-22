@@ -104,3 +104,24 @@ async def test_risk_guard_blocks_oversized_order(agent):
     res = next(e for e in events if e["type"] == "tool_result")
     assert not res["ok"] and "risk guard" in res["result"]["error"]
     assert not any(e["type"] == "confirm" for e in events)
+
+
+def test_tool_groups_join_when_mentioned_and_stay():
+    from wallex_agent.agent.tools import TOOLS
+    from wallex_agent.agent.toolsets import select_tools
+
+    names = list(TOOLS)
+    core = select_tools(names, [{"role": "user", "content": "قیمت تتر"}])
+    assert "get_ticker" in core and "futures_open_position" not in core and "render_dashboard" not in core
+    assert len(core) < len(names) - 12
+
+    msgs = [{"role": "user", "content": "یه پوزیشن لانگ ETHUSDT با اهرم ۳ باز کن"},
+            {"role": "assistant", "content": "", "tool_calls": [{"id": "1", "type": "function",
+             "function": {"name": "futures_open_position", "arguments": "{}"}}]},
+            {"role": "user", "content": "حالا حد ضررش رو عوض کن"}]
+    assert "futures_set_tp_sl" in select_tools(names, msgs)
+
+
+def test_engine_key_is_not_journaled():
+    from wallex_agent.engine.runner import SECRET_FIELDS
+    assert {"llm_api_key", "engine_llm_api_key", "wallex_api_key"} <= SECRET_FIELDS

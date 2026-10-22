@@ -32,7 +32,8 @@ def make_decider(s: Settings, kind: str, offline: bool = False):
     if kind == "rules":
         return RuleDecider(s.engine_min_score)
     from openai import AsyncOpenAI
-    llm = AsyncOpenAI(base_url=s.llm_base_url, api_key=s.llm_api_key or "missing")
+    llm = AsyncOpenAI(base_url=s.engine_llm_base_url or s.llm_base_url,
+                      api_key=s.engine_llm_api_key or s.llm_api_key or "missing")
     extra = json.loads(s.engine_llm_extra_body) if s.engine_llm_extra_body.strip() else None
     return AIDecider(llm, s.engine_llm_model or s.llm_model, ResponseCache(s.data_dir / "ai_cache.jsonl"),
                      s.engine_fee_rate, offline=offline, extra_body=extra)
