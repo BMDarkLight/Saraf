@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import math
+
 import time
 import uuid
 from typing import Any
 
 from ..config import Settings
 from ..wallex import WallexClient, WallexError
-from .base import BrokerError, JsonState, MarketInfo, SpotBroker, fmt_num, round_down, wrap_wallex_error
+from .base import BrokerError, JsonState, MarketInfo, SpotBroker, fmt_num, round_down, safe_float, wrap_wallex_error
 
 PAPER_FEE = 0.002  # Wallex spot taker fee is ~0.2-0.25%
 
@@ -56,8 +58,14 @@ class LiveSpotBroker(SpotBroker):
         side, type = side.upper(), type.upper()
         info = await self.info.quote(symbol)
         if side == "BUY" and type == "MARKET" and quantity is None and quote_amount is not None:
-            # Wallex takes MARKET orders by quantity: leave room for the taker fee and the ask moving,
-            # or "spend all my TMN" is rejected for insufficient balance
+            # "Spend N TMN": Wallex reserves a MARKET buy against a protective price above the ask, so a
+            # near-whole-balance market buy is rejected (error 1006, seen live with 4,975,067 of 5,000,000).
+            # A LIMIT at the live best ask reserves exactly qty x price and fills at once like a market order.
+            book = await self.client.depth(symbol)
+            asks = [safe_float(lv["price"]) for lv in book.get("ask", []) if safe_float(lv["price"])]
+            if asks:   # round up to the tick: a buy limit a hair under the ask would rest instead of filling
+                step = 10 ** info["price_decimals"]
+                type, price = "LIMIT", math.ceil(min(asks) * step - 1e-9) / step
             quote_amount = quote_amount / (1 + LIVE_BUY_HEADROOM)
         qty = await _resolve_quantity(info, side, quantity, quote_amount, price)
         if type == "LIMIT" and price is None:

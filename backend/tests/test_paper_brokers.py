@@ -208,15 +208,18 @@ async def test_wallex_error_with_list_error_code_keeps_the_real_reason():
         await c.place_order("USDTTMN", "BUY", "MARKET", "18.3")
 
 
-async def test_live_market_buy_of_whole_balance_leaves_fee_headroom(fake):
+async def test_live_whole_balance_buy_goes_as_limit_at_best_ask(fake):
+    """Wallex rejected a 4,975,067-of-5,000,000 MARKET buy (1006): it reserves above the ask. A LIMIT at
+    the best ask reserves exactly qty x price and still fills at once."""
     from wallex_agent.brokers import LiveSpotBroker
     sent = {}
 
     async def place_order(symbol, side, type, quantity, price=None, client_id=None):
-        sent.update(symbol=symbol, quantity=float(quantity))
+        sent.update(symbol=symbol, type=type, quantity=float(quantity), price=float(price))
         return {"status": "FILLED"}
 
     fake.place_order = place_order
     await LiveSpotBroker(fake).place_order("BTCTMN", "BUY", "MARKET", quote_amount=5_000_000)
-    ask = fake._bid_ask("BTCTMN")[1]
-    assert sent["quantity"] * ask * 1.003 < 5_000_000      # fits even after a 0.3% taker fee
+    best_ask = min(float(lv["price"]) for lv in (await fake.depth("BTCTMN"))["ask"])
+    assert sent["type"] == "LIMIT" and best_ask <= sent["price"] < best_ask + 1   # marketable, one tick at most
+    assert sent["quantity"] * sent["price"] * 1.003 < 5_000_000      # fits even after a 0.3% taker fee
