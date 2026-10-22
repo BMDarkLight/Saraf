@@ -4,14 +4,40 @@
     {
       "name": "wallex-agent",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "--project", "backend", "python", "-m", "wallex_agent.server"],
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "backend",
+        "python",
+        "-m",
+        "wallex_agent.server"
+      ],
       "port": 8000
     },
     {
       "name": "mock-llm",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "--project", "backend", "python", "backend/scripts/mock_llm.py"],
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "backend",
+        "python",
+        "backend/scripts/mock_llm.py"
+      ],
       "port": 1234
+    },
+    {
+      "name": "ui-dev-remote",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "API_PROXY=http://127.0.0.1:8765",
+        "npm",
+        "--prefix",
+        "frontend",
+        "run",
+        "dev"
+      ],
+      "port": 5173
     }
   ]
 }

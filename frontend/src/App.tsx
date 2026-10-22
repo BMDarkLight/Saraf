@@ -10,6 +10,17 @@ import { PriceChart } from "./components/PriceChart";
 
 type Tab = "markets" | "chat" | "trade";
 
+const icon = (d: string) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d={d} />
+  </svg>
+);
+const TAB_ICONS: Record<Tab, React.ReactNode> = {
+  markets: icon("M4 6h16M4 12h16M4 18h10"),
+  chat: icon("M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"),
+  trade: icon("M4 19V5m0 14h16M8 15l4-5 3 3 5-6"),
+};
+
 function initialTheme(): string {
   try { return localStorage.getItem("theme") || "auto"; } catch { return "auto"; }
 }
@@ -67,14 +78,18 @@ export default function App() {
         </div>
       )}
       <main className="layout">
-        <section className={`col ${tab === "markets" ? "active" : ""}`}>
+        <div className="seg side-switch" role="tablist" aria-label="پنل کناری">
+          <button className={tab === "markets" ? "on" : ""} onClick={() => setTab("markets")}>بازارها</button>
+          <button className={tab !== "markets" ? "on" : ""} onClick={() => setTab("trade")}>نمودار و پورتفو</button>
+        </div>
+        <section className={`col markets-col ${tab === "markets" ? "active side-on" : ""}`}>
           <Markets selected={symbol} onSelect={(s) => { setSymbol(s); }} />
           <FearGreed />
         </section>
         <section className={`col chat-col ${tab === "chat" ? "active" : ""}`}>
           <Chat ref={chat} onTrade={() => setRefresh((x) => x + 1)} onSymbol={setSymbol} />
         </section>
-        <section className={`col side-left ${tab === "trade" ? "active" : ""}`}>
+        <section className={`col side-left ${tab === "trade" ? "active" : ""} ${tab !== "markets" ? "side-on" : ""}`}>
           <PriceChart symbol={symbol} theme={String(dark)} />
           <OrderBook symbol={symbol} />
           <Portfolio refreshKey={refresh} onAsk={ask} />
@@ -83,7 +98,10 @@ export default function App() {
       <AlertToasts onAsk={ask} />
       <nav className="mobile-tabs">
         {([["markets", "بازارها"], ["chat", "ایجنت"], ["trade", "نمودار و پورتفو"]] as const).map(([k, l]) => (
-          <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}</button>
+          <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)} aria-current={tab === k ? "page" : undefined}>
+            {TAB_ICONS[k]}
+            {l}
+          </button>
         ))}
       </nav>
     </>

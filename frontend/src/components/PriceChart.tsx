@@ -17,7 +17,7 @@ export function PriceChart({ symbol, theme }: { symbol: string; theme: string })
     if (!el.current) return;
     const c = createChart(el.current, {
       autoSize: true,
-      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: cssVar("--muted"), fontFamily: "Vazirmatn", attributionLogo: false },
+      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: cssVar("--muted"), fontFamily: "IRANSansX, Tahoma, sans-serif", attributionLogo: false },
       grid: { vertLines: { color: cssVar("--border-soft") }, horzLines: { color: cssVar("--border-soft") } },
       rightPriceScale: { borderVisible: false },
       timeScale: { borderVisible: false, timeVisible: true },

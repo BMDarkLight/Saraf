@@ -24,7 +24,7 @@ function useChart(build: (c: IChartApi) => (() => void) | void, deps: unknown[],
     if (!el.current) return;
     const c = createChart(el.current, {
       autoSize: true,
-      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: css("--muted"), fontFamily: "Vazirmatn", attributionLogo: false },
+      layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: css("--muted"), fontFamily: "IRANSansX, Tahoma, sans-serif", attributionLogo: false },
       grid: { vertLines: { visible: false }, horzLines: { color: css("--border-soft") } },
       rightPriceScale: { borderVisible: false },
       timeScale: { borderVisible: false, timeVisible: true },
