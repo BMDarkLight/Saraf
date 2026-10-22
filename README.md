@@ -71,6 +71,9 @@ Switching model changes the AI cache key, so the published offline replays need 
 
 ### Deploy (VPS / Liara)
 
+Bare VPS without Docker (e.g. Liara): clone, then `bash scripts/setup_vps.sh` installs uv, asks for the keys,
+runs the check below and starts a 4h shadow session as the `wallex-shadow` systemd service.
+
 On a new host, check that Wallex (public + key/IP whitelist) and the LLM are reachable before a long run.
 Read-only, never places orders:
 
