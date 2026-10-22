@@ -235,7 +235,8 @@ class WallexClient:
         return await self._request("GET", f"/v1/account/orders/{client_order_id}", auth=True)
 
     async def cancel_order(self, client_order_id: str) -> Any:
-        return await self._request("DELETE", "/v1/account/orders", params={"clientOrderId": client_order_id}, auth=True)
+        # the docs (spot-cancel-order): the client order id goes in the path, not the query string
+        return await self._request("DELETE", f"/v1/account/orders/{client_order_id}", auth=True)
 
     async def open_orders(self, symbol: str | None = None) -> list[dict]:
         res = await self._request("GET", "/v1/account/openOrders", params={"symbol": symbol}, auth=True)

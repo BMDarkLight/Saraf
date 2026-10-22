@@ -239,3 +239,32 @@ async def test_detects_a_main_account_key():
         c = WallexClient(api_key="k", sub_account="X-PROP-1")
         c._http = httpx.AsyncClient(base_url="https://x", transport=httpx.MockTransport(handler))
         assert await c.key_is_main_account() is expected
+
+
+async def test_live_order_requests_match_wallex_docs():
+    """Shapes of every live order call, against a mocked Wallex: place (market/limit, buy/sell),
+    status, cancel (client id in the PATH, per the docs) - all with the credit sub-account header."""
+    import json as _json
+    import httpx
+    from wallex_agent.wallex import WallexClient
+
+    calls = []
+
+    def handler(req):
+        calls.append((req.method, req.url.path, dict(req.url.params), _json.loads(req.content or b"{}"),
+                      req.headers.get("sub-account-client-id")))
+        return httpx.Response(200, json={"success": True, "result": {"clientOrderId": "c1", "status": "NEW"}})
+
+    c = WallexClient(api_key="k", sub_account="SUB")
+    c._http = httpx.AsyncClient(base_url="https://x", transport=httpx.MockTransport(handler))
+    await c.place_order("USDTTMN", "buy", "limit", "1.8", price="272000")
+    await c.place_order("USDTTMN", "sell", "market", "1.8")
+    await c.get_order("c1")
+    await c.cancel_order("c1")
+    (m1, p1, _, b1, h1), (m2, p2, _, b2, _), (m3, p3, _, _, _), (m4, p4, q4, _, h4) = calls
+    assert (m1, p1, b1) == ("POST", "/v1/account/orders",
+                            {"symbol": "USDTTMN", "side": "BUY", "type": "LIMIT", "quantity": "1.8", "price": "272000"})
+    assert b2 == {"symbol": "USDTTMN", "side": "SELL", "type": "MARKET", "quantity": "1.8"}   # no price on MARKET
+    assert (m3, p3) == ("GET", "/v1/account/orders/c1")
+    assert (m4, p4, q4) == ("DELETE", "/v1/account/orders/c1", {})
+    assert h1 == h4 == "SUB"
