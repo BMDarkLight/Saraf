@@ -1,0 +1,40 @@
+# Continuous deployment to the challenge VPS.
+# GitHub-hosted runners can't SSH in (the VPS is in Iran and port 22 is filtered from abroad), so the deploy
+# job runs on a self-hosted runner on the VPS itself, which only needs outbound HTTPS to GitHub.
+# One-time setup on the VPS: deploy/setup-runner.sh
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Backend tests
+        working-directory: backend
+        run: uv sync --frozen && uv run pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Frontend build
+        working-directory: frontend
+        run: npm ci --no-audit --no-fund && npm run build
+
+  deploy:
+    needs: test
+    runs-on: [self-hosted, wallex-vps]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy to /opt/wallex-agent
+        run: bash deploy/deploy.sh "$GITHUB_WORKSPACE" "${GITHUB_SHA::7}"

@@ -1,0 +1,16 @@
+[Unit]
+Description=Wallex autonomous trading engine
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/wallex-agent/backend
+EnvironmentFile=/opt/wallex-agent/.env
+Environment=PYTHONUNBUFFERED=1 TZ=UTC
+# ENGINE_RUN_ARGS lives in the server's .env: "--mode shadow", or "--mode live --confirm-live" for the challenge
+ExecStart=/root/.local/bin/uv run --no-dev python -m wallex_agent.engine run $ENGINE_RUN_ARGS
+Restart=always
+RestartSec=20
+
+[Install]
+WantedBy=multi-user.target

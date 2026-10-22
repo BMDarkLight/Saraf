@@ -65,6 +65,13 @@ docker compose build --build-arg GIT_COMMIT=$(git rev-parse --short HEAD)
 docker compose up -d && docker compose logs -f engine         # shadow mode by default
 ```
 
+The challenge VPS runs without Docker: `deploy/wallex-engine.service` and `deploy/wallex-web.service` (systemd, uv) in
+`/opt/wallex-agent`, nginx in front of the web app. Every push to `main` deploys automatically
+(`.github/workflows/deploy.yml`): tests run on GitHub, then a self-hosted runner on the VPS (inbound SSH is filtered
+from abroad, outbound HTTPS to GitHub works) runs `deploy/deploy.sh`, which keeps the server's `.env` and `data/`.
+One-time runner setup: `deploy/setup-runner.sh <registration-token>`. The engine's mode comes from
+`ENGINE_RUN_ARGS` in the server's `.env` (`--mode shadow`, or `--mode live --confirm-live` for the challenge).
+
 The engine resumes from `data/engine/<mode>/state.json` after a restart and reconciles positions with the
 exchange balances. Lock the Wallex API key to the server's IP and give it trading permission only (no withdrawal).
 
