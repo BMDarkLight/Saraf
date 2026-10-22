@@ -30,6 +30,9 @@ async def _resolve_quantity(info: dict, side: str, quantity: float | None, quote
     return quantity
 
 
+LIVE_BUY_HEADROOM = 0.005   # 0.3% taker fee on the challenge account + 0.2% for the ask moving
+
+
 class LiveSpotBroker(SpotBroker):
     mode = "live"
 
@@ -52,6 +55,10 @@ class LiveSpotBroker(SpotBroker):
     async def place_order(self, symbol, side, type, quantity=None, price=None, quote_amount=None) -> dict:
         side, type = side.upper(), type.upper()
         info = await self.info.quote(symbol)
+        if side == "BUY" and type == "MARKET" and quantity is None and quote_amount is not None:
+            # Wallex takes MARKET orders by quantity: leave room for the taker fee and the ask moving,
+            # or "spend all my TMN" is rejected for insufficient balance
+            quote_amount = quote_amount / (1 + LIVE_BUY_HEADROOM)
         qty = await _resolve_quantity(info, side, quantity, quote_amount, price)
         if type == "LIMIT" and price is None:
             raise BrokerError("LIMIT orders need a price")

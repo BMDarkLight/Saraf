@@ -11,6 +11,8 @@ import asyncio
 import time
 from typing import Any
 
+import json as json_lib
+
 import httpx
 
 ORDER_ERROR_CODES = {
@@ -119,8 +121,14 @@ class WallexClient:
             msg = body.get("message") if isinstance(body, dict) else None
             result = body.get("result") if isinstance(body, dict) else None
             code = result.get("error_code") if isinstance(result, dict) else None
-            if code in ORDER_ERROR_CODES:
+            if isinstance(code, (list, tuple)):   # seen live: {"error_code": [1006]} - a list crashed the lookup
+                code = code[0] if code else None
+            if isinstance(code, str) and code.isdigit():
+                code = int(code)
+            if isinstance(code, int) and code in ORDER_ERROR_CODES:
                 msg = f"{msg} (error_code {code}: {ORDER_ERROR_CODES[code]})"
+            elif isinstance(result, dict) and result:   # validation details, e.g. {"quantity": ["..."]}
+                msg = f"{msg or 'rejected'}: {json_lib.dumps(result, ensure_ascii=False)[:300]}"
             raise WallexError(msg or f"HTTP {r.status_code} from {path}", r.status_code, body)
         return body.get("result", body) if isinstance(body, dict) else body
 
