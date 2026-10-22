@@ -14,7 +14,7 @@ from wallex_agent.engine.core import Engine
 from wallex_agent.engine.decider import AIDecider, Decision, ResponseCache, RuleDecider
 from wallex_agent.engine.execution import SimExec, SpotExec
 from wallex_agent.engine.features import Bar, closed, compute, resample
-from wallex_agent.engine.feeds import SimFeed
+from wallex_agent.engine.feeds import LiveFeed, SimFeed
 from wallex_agent.engine.journal import Journal
 from wallex_agent.engine.metrics import compute_metrics
 
@@ -246,3 +246,33 @@ async def test_ai_skip_with_zero_stop_is_a_real_decision(tmp_path):
     cand = strategy.Candidate("AAATMN", "oversold_reversion", 0.7, 100, 1, 2.5, 3.5, [])
     d = await ai.decide_entry(cand, {})
     assert d.source == "llm" and d.payload["action"] == "SKIP" and d.payload["confidence"] == 0.85
+
+
+async def test_universe_skips_credit_blocked_markets(tmp_path):
+    class Markets:
+        async def markets(self):
+            st = {"bidPrice": "100", "askPrice": "100.1", "24h_quoteVolume": "1"}
+            return {"BTCTMN": {"quoteAsset": "TMN", "stats": {**st, "24h_quoteVolume": "9"}},
+                    "TONTMN": {"quoteAsset": "TMN", "stats": {**st, "24h_quoteVolume": "8"}},   # blocked on credit
+                    "ETHTMN": {"quoteAsset": "TMN", "stats": st}}
+
+    feed = LiveFeed(Markets(), make_settings(tmp_path, engine_universe_size=2))
+    assert await feed.universe() == ["BTCTMN", "ETHTMN"]
+    feed = LiveFeed(Markets(), make_settings(tmp_path, engine_universe_size=2, engine_blocked_markets=""))
+    assert await feed.universe() == ["BTCTMN", "TONTMN"]
+
+
+async def test_client_sends_sub_account_header_on_auth_calls():
+    import httpx
+    from wallex_agent.wallex import WallexClient
+
+    seen = []
+
+    def handler(req):
+        seen.append(dict(req.headers))
+        return httpx.Response(200, json={"success": True, "result": {"balances": {}}})
+
+    c = WallexClient(api_key="k", sub_account="SUB-1")
+    c._http = httpx.AsyncClient(base_url="https://x", transport=httpx.MockTransport(handler))
+    await c.balances()
+    assert seen[0]["x-api-key"] == "k" and seen[0]["sub-account-client-id"] == "SUB-1"

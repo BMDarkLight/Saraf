@@ -7,6 +7,22 @@ export function price(v: number | null | undefined): string {
   return nf(d).format(v);
 }
 
+/** Decimals needed to tell order book levels apart (USDT books tick in cents; "81,734" x4 looked fake). */
+export function bookDecimals(prices: number[]): number {
+  let d = 0;
+  for (const p of prices) {
+    const s = String(p);
+    const i = s.indexOf(".");
+    if (i >= 0 && !s.includes("e")) d = Math.max(d, s.length - i - 1);
+  }
+  return Math.min(d, 8);
+}
+
+export function bookPrice(v: number | null | undefined, decimals: number): string {
+  if (v == null || !isFinite(v)) return "—";
+  return new Intl.NumberFormat("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(v);
+}
+
 export function compact(v: number | null | undefined): string {
   if (v == null || !isFinite(v)) return "—";
   if (Math.abs(v) < 1) return new Intl.NumberFormat("en-US", { maximumSignificantDigits: 4 }).format(v);

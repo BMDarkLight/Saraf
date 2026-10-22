@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { getJSON } from "../api";
-import { compact, price } from "../format";
+import { bookDecimals, bookPrice, compact } from "../format";
 
 export function DepthView({ d, rows = 8 }: { d: any; rows?: number }) {
   const asks = (d.top_asks ?? []).slice(0, rows).reverse();
   const bids = (d.top_bids ?? []).slice(0, rows);
+  const dec = bookDecimals([...asks, ...bids].map((l: any) => l.price));
   const max = Math.max(...[...asks, ...bids].map((l: any) => l.price * l.quantity), 1);
   const b1 = d.bands?.["1%"];
   const bidShare = b1 ? (100 * b1.bid_value) / (b1.bid_value + b1.ask_value || 1) : 50;
@@ -14,17 +15,17 @@ export function DepthView({ d, rows = 8 }: { d: any; rows?: number }) {
       {asks.map((l: any, i: number) => (
         <div className="ob-row" key={`a${i}`}>
           <i style={{ width: `${(100 * l.price * l.quantity) / max}%`, background: "var(--down)" }} />
-          <span className="down">{price(l.price)}</span><span>{compact(l.quantity)}</span>
+          <span className="down">{bookPrice(l.price, dec)}</span><span>{compact(l.quantity)}</span>
         </div>
       ))}
       <div className="ob-mid">
-        <span>{price(d.mid)}</span>
+        <span>{bookPrice(d.mid, dec)}</span>
         <span className="muted" style={{ fontWeight: 500 }}>spread {d.spread_pct}%</span>
       </div>
       {bids.map((l: any, i: number) => (
         <div className="ob-row" key={`b${i}`}>
           <i style={{ width: `${(100 * l.price * l.quantity) / max}%`, background: "var(--up)" }} />
-          <span className="up">{price(l.price)}</span><span>{compact(l.quantity)}</span>
+          <span className="up">{bookPrice(l.price, dec)}</span><span>{compact(l.quantity)}</span>
         </div>
       ))}
       <div className="imb" title="±1% liquidity">

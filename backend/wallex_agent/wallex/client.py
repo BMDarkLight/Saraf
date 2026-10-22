@@ -52,8 +52,11 @@ class _TTLCache:
 
 
 class WallexClient:
-    def __init__(self, base_url: str = "https://api.wallex.ir", api_key: str = "", timeout: float = 15.0):
+    def __init__(self, base_url: str = "https://api.wallex.ir", api_key: str = "", timeout: float = 15.0,
+                 sub_account: str = ""):
         self.api_key = api_key
+        # Trade-credit (prop) accounts have their own wallet; account endpoints target it via this header
+        self.sub_account = sub_account
         self._http = httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout,
@@ -85,6 +88,8 @@ class WallexClient:
             if not self.api_key:
                 raise WallexError("WALLEX_API_KEY is not set; this endpoint requires an API key.")
             headers["X-API-Key"] = self.api_key
+            if self.sub_account:
+                headers["sub-account-client-id"] = self.sub_account
         params = {k: v for k, v in (params or {}).items() if v is not None}
 
         for attempt in range(retries + 1):

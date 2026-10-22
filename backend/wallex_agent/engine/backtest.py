@@ -68,7 +68,7 @@ def counterfactual(feed: SimFeed, run_dir: Path, fee: float, horizon_s: int) -> 
 
 async def run_backtest(s: Settings, days: float, end: float | None = None, kinds: tuple[str, ...] = ("rules", "ai"),
                        symbols: list[str] | None = None, offline: bool = False, out_root: Path | None = None) -> dict:
-    client = WallexClient(s.wallex_base_url, s.wallex_api_key)
+    client = WallexClient(s.wallex_base_url, s.wallex_api_key, sub_account=s.wallex_sub_account_client_id)
     end = end or (time.time() // 3600) * 3600
     start = end - days * 86_400
     try:

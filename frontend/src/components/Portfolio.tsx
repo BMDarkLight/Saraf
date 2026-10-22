@@ -3,14 +3,23 @@ import { getJSON } from "../api";
 import { compact, pct, price, tone } from "../format";
 
 export function Portfolio({ refreshKey, onAsk }: { refreshKey: number; onAsk: (text: string) => void }) {
-  const [tab, setTab] = useState<"futures" | "spot">("futures");
+  const [tab, setTab] = useState<"account" | "futures" | "spot">("account");
   const [d, setD] = useState<any>(null);
+  const [acc, setAcc] = useState<any>(null);
 
   useEffect(() => {
     let live = true;
     const load = () => getJSON("/api/portfolio").then((x) => live && setD(x)).catch(() => {});
     load();
     const t = setInterval(load, 5000);
+    return () => { live = false; clearInterval(t); };
+  }, [refreshKey]);
+
+  useEffect(() => {
+    let live = true;
+    const load = () => getJSON("/api/account").then((x) => live && setAcc(x)).catch(() => {});
+    load();
+    const t = setInterval(load, 15000);
     return () => { live = false; clearInterval(t); };
   }, [refreshKey]);
 
@@ -21,12 +30,15 @@ export function Portfolio({ refreshKey, onAsk }: { refreshKey: number; onAsk: (t
         پورتفو
         <span className="spacer" />
         <div className="seg">
-          <button className={tab === "futures" ? "on" : ""} onClick={() => setTab("futures")}>فیوچرز</button>
-          <button className={tab === "spot" ? "on" : ""} onClick={() => setTab("spot")}>اسپات</button>
+          <button className={tab === "account" ? "on" : ""} onClick={() => setTab("account")}>حساب والکس</button>
+          <button className={tab === "spot" ? "on" : ""} onClick={() => setTab("spot")}>اسپات آزمایشی</button>
+          <button className={tab === "futures" ? "on" : ""} onClick={() => setTab("futures")}>فیوچرز آزمایشی</button>
         </div>
       </div>
       <div className="scroll" style={{ flex: 1 }}>
-        {tab === "futures" ? (
+        {tab === "account" ? (
+          <RealAccount acc={acc} />
+        ) : tab === "futures" ? (
           <>
             {d?.futures_error && <div className="err-box">{d.futures_error}</div>}
             {Object.entries(fw).map(([q, w]: any) => (
@@ -98,5 +110,95 @@ export function Portfolio({ refreshKey, onAsk }: { refreshKey: number; onAsk: (t
         )}
       </div>
     </div>
+  );
+}
+
+const EVENT_FA: Record<string, string> = {
+  regime: "وضعیت بازار", decision: "تصمیم AI", risk_block: "مسدود توسط ریسک", entry_order: "سفارش ورود",
+  entry: "ورود", entry_cancelled: "لغو ورود", exit: "خروج", review: "بازبینی", circuit_breaker: "توقف اضطراری",
+  error: "خطا", start: "شروع", stop: "پایان",
+};
+const REGIME_FA: Record<string, string> = { risk_on: "ریسک‌پذیر", neutral: "خنثی", risk_off: "ریسک‌گریز" };
+
+function hhmm(iso: string): string {
+  return new Date(iso).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
+}
+
+/** The real Wallex account (read-only) and the autonomous engine's live status. */
+function RealAccount({ acc }: { acc: any }) {
+  if (!acc) return <div className="card-b muted">در حال بارگذاری…</div>;
+  const e = acc.engine;
+  const ret = e?.equity_tmn != null ? (100 * (e.equity_tmn - e.capital_tmn)) / e.capital_tmn : null;
+  return (
+    <>
+      {!acc.has_key && <div className="card-b muted">کلید API والکس تنظیم نشده است.</div>}
+      {acc.error && <div className="err-box">{acc.error}</div>}
+      {acc.spot && (
+        <>
+          <div className="total">
+            <span className="muted">{acc.sub_account ? "اعتبار معاملاتی (واقعی)" : "حساب اصلی (واقعی)"}</span>
+            <span className="num"><b>{price(acc.spot.total_value_tmn)}</b> تومان</span>
+          </div>
+          {Object.entries(acc.spot.balances ?? {})
+            .sort((a: any, b: any) => b[1].value_usdt - a[1].value_usdt)
+            .map(([asset, b]: any) => (
+              <div className="bal-row" key={asset}>
+                <b className="ltr">{asset}</b>
+                <span className="num">{compact(b.total)}{b.locked ? <span className="muted" style={{ fontSize: 11 }}> (قفل {compact(b.locked)})</span> : null}</span>
+              </div>
+            ))}
+        </>
+      )}
+      {e && (
+        <div className="card-b" style={{ display: "grid", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <b>موتور معاملاتی خودکار</b>
+            <span className={`chip ${e.mode === "live" ? "live" : ""}`} style={{ background: "var(--surface-2)", color: "var(--text)" }}>
+              <span className="dot" />{e.mode === "live" ? "زنده" : "شبیه‌سازی (shadow)"}
+            </span>
+          </div>
+          <div className="stat-grid num">
+            <div><span>ارزش</span>{price(e.equity_tmn)}</div>
+            <div><span>بازده</span><b className={tone(ret)}>{pct(ret)}</b></div>
+            <div><span>افت از سقف</span>{e.drawdown_pct != null ? `${e.drawdown_pct.toFixed(2)}%` : "—"}</div>
+          </div>
+          {e.regime && (
+            <div style={{ fontSize: 12 }}>
+              <span className="muted">وضعیت بازار: </span><b>{REGIME_FA[e.regime] ?? e.regime}</b>
+              {e.regime_reason && <div className="muted" style={{ marginTop: 2 }}>{e.regime_reason}</div>}
+            </div>
+          )}
+          {e.halted && <div className="err-box" style={{ margin: 0 }}>موتور به دلیل افت سرمایه متوقف شده است.</div>}
+          {(e.positions ?? []).map((p: any) => (
+            <div className="pos" key={p.id} style={{ padding: 0 }}>
+              <div className="pos-top">
+                <span className="side LONG">خرید</span>
+                <b className="ltr">{p.symbol}</b>
+                <span className="muted" style={{ fontSize: 11 }}>{p.setup}</span>
+              </div>
+              <div className="stat-grid num">
+                <div><span>ورود</span>{price(p.entry_price)}</div>
+                <div><span>حد سود</span>{price(p.target)}</div>
+                <div><span>حد ضرر</span>{price(p.stop)}</div>
+              </div>
+            </div>
+          ))}
+          {!e.positions?.length && <div className="muted" style={{ fontSize: 12 }}>پوزیشن بازی ندارد.</div>}
+          <div style={{ fontSize: 12, display: "grid", gap: 6 }}>
+            <span className="muted">آخرین تصمیم‌ها</span>
+            {(e.events ?? []).slice(0, 12).map((ev: any, i: number) => (
+              <div key={i} style={{ borderTop: "1px solid var(--border-soft)", paddingTop: 6 }}>
+                <span className="muted num">{hhmm(ev.time)}</span>{" "}
+                <b>{EVENT_FA[ev.event] ?? ev.event}</b>{" "}
+                {ev.symbol && <span className="ltr">{ev.symbol}</span>}{" "}
+                {ev.action && <span className={ev.action === "TAKE" ? "up" : "muted"}>{ev.action}</span>}
+                {ev.pnl_pct != null && <span className={tone(ev.pnl_pct)}> {pct(ev.pnl_pct)}</span>}
+                {ev.reason && <div className="muted" style={{ marginTop: 2 }}>{String(ev.reason).slice(0, 220)}</div>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </>
   );
 }

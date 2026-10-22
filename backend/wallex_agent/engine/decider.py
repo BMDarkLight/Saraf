@@ -191,7 +191,8 @@ class AIDecider:
             try:
                 self.calls += 1
                 resp = await asyncio.wait_for(self.llm.chat.completions.create(
-                    model=self.model, temperature=0, max_tokens=400,
+                    # max_completion_tokens: newer OpenAI models reject the legacy max_tokens
+                    model=self.model, temperature=0, max_completion_tokens=400,
                     messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                     **({"extra_body": self.extra_body} if self.extra_body else {})),
                     self.timeout)

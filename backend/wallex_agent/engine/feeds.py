@@ -16,8 +16,14 @@ from ..market.sentiment import global_fear_greed
 from ..news.web import crypto_news
 from ..wallex import WallexClient
 from .features import Bar, closed, resample, to_bars
+from .markets import CREDIT_BLOCKED
 
 DEFAULT_EXCLUDE = {"USDTTMN", "USDCTMN", "DAITMN", "XAUTTMN", "PAXGTMN", "USOONTMN", "COPXONTMN", "SLVONTMN"}
+
+
+def blocked_markets(setting: str) -> set[str]:
+    """ENGINE_BLOCKED_MARKETS: "credit" = trade-credit account's disabled markets, else a comma list."""
+    return set(CREDIT_BLOCKED) if setting.strip().lower() == "credit" else set(_symbols(setting))
 
 
 def _symbols(csv_text: str) -> list[str]:
@@ -36,12 +42,13 @@ class LiveFeed:
         return time.time()
 
     async def universe(self) -> list[str]:
+        blocked = blocked_markets(self.s.engine_blocked_markets)
         if self.s.engine_universe != "auto":
-            syms = _symbols(self.s.engine_universe)
+            syms = [s for s in _symbols(self.s.engine_universe) if s not in blocked]
         else:
             rows = []
             for sym, m in (await self.client.markets()).items():
-                if m["quoteAsset"] != "TMN" or sym in DEFAULT_EXCLUDE:
+                if m["quoteAsset"] != "TMN" or sym in DEFAULT_EXCLUDE or sym in blocked:
                     continue
                 st = m.get("stats") or {}
                 bid, ask = safe_float(st.get("bidPrice")), safe_float(st.get("askPrice"))

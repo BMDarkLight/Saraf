@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from .agent import tools as agent_tools
 from .agent.context import AppContext
 from .agent.loop import Agent
-from .brokers import BrokerError, PaperFuturesBroker, PaperSpotBroker
+from .brokers import BrokerError, LiveSpotBroker, PaperFuturesBroker, PaperSpotBroker
 from .config import ROOT, get_settings
 from .market import analytics, sentiment
 from .news import web
@@ -192,6 +192,63 @@ async def portfolio():
         out["futures_orders"] = await ctx.futures.open_orders()
     except (WallexError, BrokerError) as e:
         out["futures_error"] = str(e)
+    return out
+
+
+ENGINE_EVENTS = {"regime", "decision", "risk_block", "entry_order", "entry", "entry_cancelled", "exit", "review",
+                 "circuit_breaker", "error", "start", "stop"}
+
+
+def engine_status() -> dict | None:
+    """The autonomous engine's state, read from its journal (it runs as a separate process)."""
+    runs = [d for d in (ROOT / "data" / "engine" / m for m in ("live", "shadow")) if (d / "state.json").exists()]
+    if not runs:
+        return None
+    d = max(runs, key=lambda p: (p / "state.json").stat().st_mtime)
+    state = json.loads((d / "state.json").read_text())
+    eq_rows = (d / "equity.csv").read_text().strip().splitlines()[1:] if (d / "equity.csv").exists() else []
+    last = eq_rows[-1].split(",") if eq_rows else None
+    events = []
+    if (d / "decisions.jsonl").exists():
+        with (d / "decisions.jsonl").open("rb") as f:   # only the tail: the journal grows all challenge long
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 200_000))
+            lines = f.read().decode(errors="ignore").splitlines()[1:]
+        for line in reversed(lines):
+            with contextlib.suppress(ValueError):
+                e = json.loads(line)
+                if e.get("event") in ENGINE_EVENTS:
+                    dec = e.get("decision") or {}
+                    events.append({k: v for k, v in {
+                        "time": e["time"], "event": e["event"], "symbol": e.get("symbol"), "setup": e.get("setup"),
+                        "action": e.get("action"), "regime": e.get("regime"), "source": e.get("source"),
+                        "reason": e.get("reason") or dec.get("reasoning") or e.get("error"),
+                        "pnl_pct": e.get("pnl_pct"), "price": e.get("price")}.items() if v is not None})
+            if len(events) >= 30:
+                break
+    return {"mode": d.name, "updated": (d / "state.json").stat().st_mtime,
+            "capital_tmn": settings.engine_capital_tmn,
+            "equity_tmn": float(last[1]) if last else None, "cash_tmn": float(last[2]) if last else None,
+            "drawdown_pct": float(last[4]) if last else None,
+            "regime": state.get("regime"), "regime_reason": state.get("regime_reason"),
+            "halted": state.get("halted"), "pause_until": state.get("pause_until"),
+            "positions": list(state.get("positions", {}).values()), "closed": state.get("closed", [])[-10:],
+            "events": events}
+
+
+@app.get("/api/account")
+async def account():
+    """The real Wallex account (trade-credit sub-account when configured), read-only, plus the engine."""
+    out: dict = {"has_key": bool(settings.wallex_api_key), "sub_account": bool(settings.wallex_sub_account_client_id)}
+    if settings.wallex_api_key:
+        try:
+            out["spot"] = await agent_tools.value_balances(ctx, await LiveSpotBroker(ctx.client).balances())
+        except (WallexError, BrokerError) as e:
+            out["error"] = str(e)
+    try:
+        out["engine"] = engine_status()
+    except (OSError, ValueError) as e:
+        out["engine_error"] = str(e)
     return out
 
 

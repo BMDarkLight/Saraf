@@ -253,7 +253,11 @@ async def read_webpage(ctx: AppContext, a: UrlArgs):
 # ================================================================ account
 @tool("spot_balances", "Spot wallet balances (free / locked / total) with estimated USDT and TMN value.", NoArgs)
 async def spot_balances(ctx: AppContext, a: NoArgs):
-    bals = await ctx.spot.balances()
+    return {"mode": ctx.spot.mode, **await value_balances(ctx, await ctx.spot.balances())}
+
+
+async def value_balances(ctx: AppContext, bals: dict) -> dict:
+    """Adds value_usdt to each balance and totals in USDT and TMN (at last prices)."""
     markets = await ctx.client.markets()
 
     def px(asset: str, quote: str) -> float:
@@ -270,7 +274,7 @@ async def spot_balances(ctx: AppContext, a: NoArgs):
             v = b["total"] / usdt_tmn
         b["value_usdt"] = v
         total_usdt += v
-    return {"mode": ctx.spot.mode, "balances": bals, "total_value_usdt": total_usdt,
+    return {"balances": bals, "total_value_usdt": total_usdt,
             "total_value_tmn": total_usdt * usdt_tmn if usdt_tmn else None}
 
 

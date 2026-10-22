@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     # Wallex
     wallex_base_url: str = "https://api.wallex.ir"
     wallex_api_key: str = ""
+    # Trade-credit sub-account (clientId from GET /sub-accounts); empty = the main account
+    wallex_sub_account_client_id: str = ""
     # Futures endpoints are not in the public docs; plug them in here once known.
     wallex_futures_base_url: str = ""
 
@@ -56,6 +58,8 @@ class Settings(BaseSettings):
     engine_capital_tmn: float = 5_000_000               # challenge base capital (return is measured vs this)
     engine_universe: str = "auto"                       # "auto" or comma-separated TMN symbols
     engine_allowed_markets: str = ""                    # challenge's allowed list; empty = no restriction
+    # "credit" = the markets disabled on trade-credit accounts (engine/markets.py), or a comma list, or empty
+    engine_blocked_markets: str = "credit"
     engine_universe_size: int = 10
     engine_max_spread_pct: float = 0.4
     engine_timeframe_min: int = 15

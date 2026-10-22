@@ -30,7 +30,7 @@ def git_commit() -> str:
 
 async def run_engine(s: Settings, mode: str, confirm_live: bool = False, max_loops: int | None = None,
                      hours: float | None = None) -> None:
-    client = WallexClient(s.wallex_base_url, s.wallex_api_key)
+    client = WallexClient(s.wallex_base_url, s.wallex_api_key, sub_account=s.wallex_sub_account_client_id)
     out = ROOT / "data" / "engine" / mode
     out.mkdir(parents=True, exist_ok=True)
     if mode == "live":
