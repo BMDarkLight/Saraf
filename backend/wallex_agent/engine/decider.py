@@ -27,6 +27,7 @@ from typing import Literal
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 
+from ..llm_compat import chat_create
 from .strategy import Candidate
 
 
@@ -172,8 +173,10 @@ class AIDecider:
     name = "ai"
 
     def __init__(self, llm: AsyncOpenAI, model: str, cache: ResponseCache, fee_rate: float,
-                 timeout: float = 45.0, offline: bool = False, extra_body: dict | None = None):
+                 timeout: float = 45.0, offline: bool = False, extra_body: dict | None = None,
+                 max_tokens: int = 400):
         self.llm, self.model, self.cache = llm, model, cache
+        self.max_tokens = max_tokens   # reasoning models count their thinking in this budget
         self.extra_body = extra_body or {}   # provider switches, e.g. {"reasoning_effort": "none"} for Qwen
         self.fee_rate, self.timeout = fee_rate, timeout
         self.offline = offline  # backtest replay: cache only, never call the API
@@ -190,8 +193,8 @@ class AIDecider:
             source = "llm"
             try:
                 self.calls += 1
-                resp = await asyncio.wait_for(self.llm.chat.completions.create(
-                    model=self.model, temperature=0, max_tokens=400,
+                resp = await asyncio.wait_for(chat_create(
+                    self.llm, model=self.model, temperature=0, max_tokens=self.max_tokens,
                     messages=[{"role": "system", "content": system}, {"role": "user", "content": user}],
                     **({"extra_body": self.extra_body} if self.extra_body else {})),
                     self.timeout)

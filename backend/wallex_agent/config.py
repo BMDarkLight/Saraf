@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     # JSON merged into the LLM request body. Thinking models must answer directly, e.g. for Qwen on
     # GapGPT: {"reasoning_effort": "none"} (otherwise its reasoning eats the token budget: no answer)
     engine_llm_extra_body: str = ""
+    # Completion budget per decision. Reasoning models (gpt-5.x) spend part of it thinking; raise it
+    # (e.g. 2000) if `engine check` reports an empty answer.
+    engine_llm_max_tokens: int = 400
     engine_capital_tmn: float = 5_000_000               # challenge base capital (return is measured vs this)
     engine_universe: str = "auto"                       # "auto" or comma-separated TMN symbols
     engine_allowed_markets: str = ""                    # challenge's allowed list; empty = no restriction

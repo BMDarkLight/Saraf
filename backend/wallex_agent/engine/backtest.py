@@ -35,7 +35,8 @@ def make_decider(s: Settings, kind: str, offline: bool = False):
     llm = AsyncOpenAI(base_url=s.llm_base_url, api_key=s.llm_api_key or "missing")
     extra = json.loads(s.engine_llm_extra_body) if s.engine_llm_extra_body.strip() else None
     return AIDecider(llm, s.engine_llm_model or s.llm_model, ResponseCache(s.data_dir / "ai_cache.jsonl"),
-                     s.engine_fee_rate, offline=offline, extra_body=extra)
+                     s.engine_fee_rate, offline=offline, extra_body=extra,
+                     max_tokens=s.engine_llm_max_tokens)
 
 
 def counterfactual(feed: SimFeed, run_dir: Path, fee: float, horizon_s: int) -> dict:

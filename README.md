@@ -57,7 +57,26 @@ ENGINE_FEE_RATE=0.001          # the challenge account's real TMN fee (maker = t
 ENGINE_MAKER_FEE_RATE=0.001
 ```
 
-### Deploy (VPS)
+GPT-5-family models (e.g. via BoxAPI) reject `temperature` / `max_tokens`; the client detects that and adapts
+per model. They count their reasoning in the completion budget, so give the engine more room. Take the exact
+base URL from the BoxAPI docs:
+
+```bash
+LLM_BASE_URL=<BoxAPI OpenAI-compatible base URL>
+LLM_MODEL=gpt-5.6-sol
+ENGINE_LLM_MAX_TOKENS=2000
+```
+
+Switching model changes the AI cache key, so the published offline replays need the GapGPT model setting.
+
+### Deploy (VPS / Liara)
+
+On a new host, check that Wallex (public + key/IP whitelist) and the LLM are reachable before a long run.
+Read-only, never places orders:
+
+```bash
+cd backend && uv run python -m wallex_agent.engine check
+```
 
 ```bash
 git clone <repo> && cd wallex-agent && cp .env.example .env   # fill LLM_*, WALLEX_API_KEY, ENGINE_*

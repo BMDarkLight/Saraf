@@ -23,6 +23,7 @@ from openai import APIConnectionError, APIStatusError, AsyncOpenAI
 from pydantic import ValidationError
 
 from ..brokers import BrokerError
+from ..llm_compat import chat_create
 from ..wallex import WallexError
 from . import risk
 from .context import AppContext
@@ -253,7 +254,7 @@ class Agent:
         kwargs = dict(model=s.llm_model, messages=messages, tools=openai_tools(s.llm_compat_schemas),
                       temperature=s.llm_temperature)
         if not s.llm_stream:
-            resp = await self.llm.chat.completions.create(**kwargs)
+            resp = await chat_create(self.llm, **kwargs)
             m = resp.choices[0].message
             if m.content:
                 yield {"type": "text", "delta": m.content}
@@ -265,7 +266,7 @@ class Agent:
             yield {"type": "_message", "message": msg}
             return
 
-        stream = await self.llm.chat.completions.create(**kwargs, stream=True)
+        stream = await chat_create(self.llm, **kwargs, stream=True)
         content, calls = [], {}
         async for chunk in stream:
             if not chunk.choices:

@@ -4,6 +4,7 @@
   python -m wallex_agent.engine run --mode shadow
   python -m wallex_agent.engine run --mode live --confirm-live
   python -m wallex_agent.engine report data/engine/live
+  python -m wallex_agent.engine check      # pre-flight on a new host: Wallex + LLM reachable?
 """
 
 import argparse
@@ -31,6 +32,7 @@ def main() -> None:
     r.add_argument("--hours", type=float, help="stop after this many hours (shadow sessions); positions are closed to TMN")
     rep = sub.add_parser("report")
     rep.add_argument("dir")
+    sub.add_parser("check")
     a = p.parse_args()
     s = get_settings()
 
@@ -49,6 +51,9 @@ def main() -> None:
             for k in ("net_return_pct", "max_drawdown_pct", "trades", "win_rate_pct", "profit_factor",
                       "avg_trade_pnl_pct", "fees_paid_tmn", "llm_calls", "counterfactual_by_action"):
                 print(f"  {k}: {m.get(k)}")
+    elif a.cmd == "check":
+        from .check import run_check
+        raise SystemExit(0 if asyncio.run(run_check(s)) else 1)
     elif a.cmd == "run":
         from .runner import run_engine
         asyncio.run(run_engine(s, a.mode or s.engine_mode, a.confirm_live, hours=a.hours))
