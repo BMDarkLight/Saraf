@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
+import shutil
 import csv
 import json
 import time
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -298,6 +300,35 @@ def engine_status() -> dict | None:
             "halted": state.get("halted"), "pause_until": state.get("pause_until"),
             "positions": list(state.get("positions", {}).values()), "pending": pending,
             "trades": recent, "stats": stats, "events": events}
+
+
+MODE_ARGS = {"live": "--mode live --confirm-live", "shadow": "--mode shadow"}
+ENGINE_SERVICE = "wallex-engine"
+
+
+class EngineModeIn(BaseModel):
+    mode: Literal["live", "shadow"]
+    # switching to real money must be an explicit, deliberate request, not a stray POST
+    confirm: str = ""
+
+
+@app.post("/api/engine/mode")
+async def set_engine_mode(body: EngineModeIn):
+    """Switch the autonomous engine between shadow and live: write data/engine/mode.env (read by the
+    systemd unit after .env) and restart the engine service. Its state resumes per mode."""
+    if body.mode == "live" and body.confirm != "LIVE":
+        raise HTTPException(400, "switching to live needs confirm=LIVE")
+    if not shutil.which("systemctl"):
+        raise HTTPException(501, "the engine is not running as a systemd service here")
+    f = ROOT / "data" / "engine" / "mode.env"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(f"ENGINE_RUN_ARGS={MODE_ARGS[body.mode]}\n")
+    proc = await asyncio.create_subprocess_exec("systemctl", "restart", ENGINE_SERVICE,
+                                                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    _, err = await proc.communicate()
+    if proc.returncode:
+        raise HTTPException(500, f"restart failed: {err.decode(errors='ignore')[:300]}")
+    return {"ok": True, "mode": body.mode}
 
 
 @app.get("/api/account")

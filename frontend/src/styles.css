@@ -443,3 +443,20 @@ input[type="range"] { direction: ltr; }
 .chip.live .dot { animation: live-pulse 1.8s ease-out infinite; }
 @keyframes live-pulse { 0% { box-shadow: 0 0 0 0 rgba(246, 85, 85, 0.55); } 100% { box-shadow: 0 0 0 7px rgba(246, 85, 85, 0); } }
 @media (prefers-reduced-motion: reduce) { .chip.live .dot { animation: none; } }
+
+/* --------------------------------------------------------- engine mode */
+.eng-head .spacer { flex: 1; }
+.mode-switch { width: 100%; padding: 3px; }
+.mode-switch button { flex: 1; padding: 6px 10px; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.mode-switch button:disabled { cursor: default; opacity: 0.6; }
+.mode-switch button .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+.mode-switch button.on.live { color: var(--down); }
+.mode-switch button.on.live .dot { background: var(--down); animation: live-pulse 1.8s ease-out infinite; }
+.mode-note { font-size: 12px; }
+.mode-confirm { border-radius: 10px; padding: 10px 12px; font-size: 12.5px; background: var(--surface-2); border: 1px solid var(--border); }
+.mode-confirm.live { background: var(--down-soft); border-color: var(--down); }
+.mode-confirm p { margin: 0 0 8px; line-height: 1.8; }
+.mode-confirm-actions { display: flex; gap: 8px; }
+.btn.danger { background: var(--down); color: #fff; }
+.btn.danger:hover { filter: brightness(1.08); }
+@media (prefers-reduced-motion: reduce) { .mode-switch button.on.live .dot { animation: none; } }

@@ -34,7 +34,8 @@ systemctl restart wallex-web wallex-engine
 
 for _ in $(seq 1 30); do
   if curl -fsS -o /dev/null http://127.0.0.1:8000/api/config && systemctl is-active --quiet wallex-engine; then
-    echo "deployed $COMMIT: web up, engine $(systemctl is-active wallex-engine) ($(grep '^ENGINE_RUN_ARGS=' "$APP/.env"))"
+    MODE=$(cat "$APP/data/engine/mode.env" 2>/dev/null || grep '^ENGINE_RUN_ARGS=' "$APP/.env")
+    echo "deployed $COMMIT: web up, engine $(systemctl is-active wallex-engine) ($MODE)"
     exit 0
   fi
   sleep 2

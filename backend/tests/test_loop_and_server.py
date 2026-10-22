@@ -221,3 +221,32 @@ def test_session_store_roundtrip(tmp_path):
     assert st.load(sid)["transcript"][0]["text"] == "قیمت تتر"
     assert st.load("../../etc/passwd") is None and st._path("../x") is None
     assert st.delete(sid) and st.list() == []
+
+
+def test_engine_mode_switch_requires_live_confirmation(tmp_path, monkeypatch):
+    import asyncio
+    from fastapi.testclient import TestClient
+    from wallex_agent import server
+
+    calls = []
+
+    class Proc:
+        returncode = 0
+        async def communicate(self):
+            return b"", b""
+
+    async def fake_exec(*args, **kw):
+        calls.append(args)
+        return Proc()
+
+    monkeypatch.setattr(server, "ROOT", tmp_path)
+    monkeypatch.setattr(server.shutil, "which", lambda name: "/bin/systemctl")
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    c = TestClient(server.app)
+    assert c.post("/api/engine/mode", json={"mode": "live"}).status_code == 400
+    assert not calls and not (tmp_path / "data/engine/mode.env").exists()
+    assert c.post("/api/engine/mode", json={"mode": "live", "confirm": "LIVE"}).json()["mode"] == "live"
+    assert (tmp_path / "data/engine/mode.env").read_text() == "ENGINE_RUN_ARGS=--mode live --confirm-live\n"
+    assert calls[-1] == ("systemctl", "restart", "wallex-engine")
+    assert c.post("/api/engine/mode", json={"mode": "shadow"}).status_code == 200
+    assert "--mode shadow" in (tmp_path / "data/engine/mode.env").read_text()
