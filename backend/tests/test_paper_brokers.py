@@ -223,3 +223,19 @@ async def test_live_whole_balance_buy_goes_as_limit_at_best_ask(fake):
     best_ask = min(float(lv["price"]) for lv in (await fake.depth("BTCTMN"))["ask"])
     assert sent["type"] == "LIMIT" and best_ask <= sent["price"] < best_ask + 1   # marketable, one tick at most
     assert sent["quantity"] * sent["price"] * 1.003 < 5_000_000      # fits even after a 0.3% taker fee
+
+
+async def test_detects_a_main_account_key():
+    import httpx
+    from wallex_agent.wallex import WallexClient
+
+    def main_key(req):
+        return httpx.Response(200, json={"success": True, "result": [{"clientId": "X-PROP-1"}]})
+
+    def credit_key(req):
+        return httpx.Response(403, json={"success": False, "result": []})
+
+    for handler, expected in ((main_key, True), (credit_key, False)):
+        c = WallexClient(api_key="k", sub_account="X-PROP-1")
+        c._http = httpx.AsyncClient(base_url="https://x", transport=httpx.MockTransport(handler))
+        assert await c.key_is_main_account() is expected

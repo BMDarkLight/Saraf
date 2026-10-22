@@ -348,10 +348,26 @@ async def set_engine_mode(body: EngineModeIn):
     return {"ok": True, "mode": body.mode}
 
 
+_key_check: dict = {"at": 0.0, "main": None}
+
+
+async def check_trading_key() -> bool:
+    """Is a main-account key configured for a trade-credit sub-account? (orders would fail with 1006)"""
+    if not (settings.wallex_api_key and settings.wallex_sub_account_client_id):
+        return False
+    if time.time() - _key_check["at"] > 600 or _key_check["main"] is None:
+        _key_check.update(at=time.time(), main=await ctx.client.key_is_main_account())
+    ctx.key_is_main = bool(_key_check["main"])
+    return ctx.key_is_main
+
+
 @app.get("/api/account")
 async def account():
     """The real Wallex account (trade-credit sub-account when configured), read-only, plus the engine."""
     out: dict = {"has_key": bool(settings.wallex_api_key), "sub_account": bool(settings.wallex_sub_account_client_id)}
+    if await check_trading_key():
+        out["key_warning"] = ("کلید API فعلی مال حساب اصلی است؛ موجودی اعتبار معاملاتی را می‌خواند ولی سفارش‌ها با موجودی "
+                              "حساب اصلی سنجیده و رد می‌شوند. برای حساب «هکاتون» یک کلید API با دسترسی معامله بسازید.")
     if settings.wallex_api_key:
         try:
             out["spot"] = await agent_tools.value_balances(ctx, await LiveSpotBroker(ctx.client).balances())

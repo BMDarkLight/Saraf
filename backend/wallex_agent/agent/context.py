@@ -15,6 +15,8 @@ class AppContext:
     spot: SpotBroker
     futures: FuturesBroker
     alerts: AlertStore
+    # set by the server: the API key is the main account's while a trade-credit sub-account is configured
+    key_is_main: bool = False
 
     @classmethod
     def build(cls, settings: Settings) -> "AppContext":

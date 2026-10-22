@@ -185,6 +185,17 @@ class WallexClient:
         ]
 
     # -------------------------------------------------------------- account
+    async def key_is_main_account(self) -> bool | None:
+        """True when the API key belongs to the main account (it can list sub-accounts). Reads of a
+        trade-credit sub-account work with such a key plus the header, but Wallex checks ORDERS against
+        the key's own account: trading a credit account needs a key created on that account."""
+        try:
+            r = await self._http.get("/sub-accounts", headers={"X-API-Key": self.api_key})
+            body = r.json()
+        except (httpx.HTTPError, ValueError):
+            return None
+        return bool(r.status_code == 200 and body.get("success") and body.get("result"))
+
     async def profile(self) -> dict:
         return await self._request("GET", "/v1/account/profile", auth=True)
 

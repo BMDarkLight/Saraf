@@ -101,6 +101,7 @@ function RealAccount({ acc }: { acc: any }) {
     <>
       {!acc.has_key && <div className="card-b muted">کلید API والکس تنظیم نشده است.</div>}
       {acc.error && <div className="err-box">{acc.error}</div>}
+      {acc.key_warning && <div className="err-box">{acc.key_warning}</div>}
       {acc.spot && (
         <>
           <div className="total">
