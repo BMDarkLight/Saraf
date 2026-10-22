@@ -83,7 +83,11 @@ export default function App() {
           <button className={tab !== "markets" ? "on" : ""} onClick={() => setTab("trade")}>نمودار و پورتفو</button>
         </div>
         <section className={`col markets-col ${tab === "markets" ? "active side-on" : ""}`}>
-          <Markets selected={symbol} onSelect={(s) => { setSymbol(s); }} />
+          {/* below desktop the chart sits on another tab: jump there so the pick is visible */}
+          <Markets selected={symbol} onSelect={(s) => {
+            setSymbol(s);
+            if (matchMedia("(max-width: 1180px)").matches) setTab("trade");
+          }} />
           <FearGreed />
         </section>
         <section className={`col chat-col ${tab === "chat" ? "active" : ""}`}>
