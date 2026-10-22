@@ -16,6 +16,19 @@ async def test_market_buy_spends_quote_and_charges_fee(ctx):
     assert b["BTC"]["total"] == pytest.approx(o["executedQty"] * 0.998)
 
 
+async def test_market_buy_can_spend_the_whole_balance(ctx):
+    # "convert all my USDT": sized in quote, so no slippage buffer may block it (it used to need +1%)
+    o = await ctx.spot.place_order("BTCUSDT", "BUY", "MARKET", quote_amount=1000)
+    b = await ctx.spot.balances()
+    assert o["status"] == "FILLED"
+    assert 0 <= b["USDT"]["total"] < 1
+
+
+async def test_quantity_sized_buy_keeps_the_slippage_buffer(ctx):
+    with pytest.raises(BrokerError, match="insufficient USDT"):
+        await ctx.spot.place_order("BTCUSDT", "BUY", "MARKET", quantity=9.99)   # ~1000 USDT + buffer
+
+
 async def test_market_buy_never_overdraws_on_thin_expensive_book(ctx, fake):
     # top level is tiny; the rest of the book is 50% higher: walking it must not push USDT negative
     fake.books["BTCUSDT"] = {"ask": [{"price": 100.1, "quantity": 0.01}, {"price": 150, "quantity": 100}],

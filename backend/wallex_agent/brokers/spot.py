@@ -221,7 +221,14 @@ class PaperSpotBroker(SpotBroker):
         if qty * ref < info["min_notional"]:
             raise BrokerError(f"order value {qty * ref:.4f} {info['quote']} is below min notional {info['min_notional']}")
 
-        need_asset, need = (info["quote"], qty * ref * 1.01) if side == "BUY" else (info["base"], qty)
+        if side == "BUY":
+            # A market buy sized in quote ("spend all my TMN") spends at most quote_amount: the book walk
+            # caps the cost and the fee comes out of the bought asset. Only quantity-sized buys need the
+            # 1% slippage buffer; applying it here made "spend everything" always fail.
+            sized_in_quote = type == "MARKET" and quote_amount is not None and quantity is None
+            need_asset, need = info["quote"], (quote_amount if sized_in_quote else qty * ref * 1.01)
+        else:
+            need_asset, need = info["base"], qty
         if self._free(need_asset) < need - 1e-9:
             raise BrokerError(f"insufficient {need_asset}: need ~{need:.8g}, free {self._free(need_asset):.8g}")
 
