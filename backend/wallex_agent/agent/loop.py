@@ -28,6 +28,7 @@ from . import risk
 from .context import AppContext
 from .prompts import system_prompt
 from .tools import TOOLS, openai_tools
+from .sessions import SessionStore
 from .toolsets import select_tools
 
 MAX_TOOL_RESULT_CHARS = 6_000   # every result is resent on each later step of the turn
@@ -168,12 +169,17 @@ class Agent:
         self.llm = AsyncOpenAI(base_url=s.llm_base_url, api_key=s.llm_api_key or "missing")
         self.sessions: dict[str, Session] = {}
         self.pending: dict[str, PendingAction] = {}
+        self.store = SessionStore(ctx.settings.data_dir)
 
     def session(self, session_id: str | None) -> Session:
         sid = session_id or uuid.uuid4().hex
-        if sid not in self.sessions:
-            self.sessions[sid] = Session(sid)
+        if sid not in self.sessions:   # a saved conversation reopened after a restart keeps its context
+            saved = self.store.load(sid) or {}
+            self.sessions[sid] = Session(sid, list(saved.get("messages") or []))
         return self.sessions[sid]
+
+    def save(self, session: Session) -> None:
+        self.store.save_history(session.id, session.messages)
 
     # --------------------------------------------------------------- tools
     async def run_tool(self, name: str, raw_args: str, session: Session) -> tuple[bool, Any, dict | None]:

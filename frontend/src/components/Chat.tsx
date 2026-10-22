@@ -1,7 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { streamSSE, type Action, type AgentEvent } from "../api";
+import { getJSON, streamSSE, type Action, type AgentEvent } from "../api";
 import { price } from "../format";
 import { GenUI } from "./GenUI";
 import { RICH, ToolChip, ToolWidget } from "./ToolWidgets";
@@ -67,6 +67,16 @@ function ConfirmCard({ action, onDecide, busy }: { action: Action; onDecide: (a:
 
 export interface ChatHandle { ask: (text: string) => void }
 
+interface SessionRow { id: string; title: string; updated: number; turns: number }
+
+function ago(ts: number): string {
+  const m = Math.max(0, Math.round((Date.now() / 1000 - ts) / 60));
+  if (m < 1) return "همین الان";
+  if (m < 60) return `${m} دقیقه پیش`;
+  if (m < 1440) return `${Math.round(m / 60)} ساعت پیش`;
+  return new Date(ts * 1000).toLocaleDateString("fa-IR");
+}
+
 export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: string) => void }>(function Chat({ onTrade, onSymbol }, ref) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -74,8 +84,52 @@ export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: 
   const session = useRef<string | null>(null);
   const abort = useRef<AbortController | null>(null);
   const log = useRef<HTMLDivElement>(null);
+  const msgsRef = useRef<Msg[]>([]);
+  const [showHist, setShowHist] = useState(false);
+  const [hist, setHist] = useState<SessionRow[]>([]);
 
   useEffect(() => { log.current?.scrollTo({ top: log.current.scrollHeight, behavior: "smooth" }); }, [msgs]);
+  useEffect(() => { msgsRef.current = msgs; }, [msgs]);
+
+  // Save the rendered transcript once a turn settles (the server already saved the LLM side)
+  useEffect(() => {
+    const sid = session.current;
+    if (busy || !sid || !msgsRef.current.length) return;
+    try { localStorage.setItem("chat_session", sid); } catch { /* storage unavailable */ }
+    fetch(`/api/sessions/${sid}`, {
+      method: "PUT", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transcript: msgsRef.current }),
+    }).catch(() => {});
+  }, [busy]);
+
+  const open = async (sid: string) => {
+    try {
+      const d = await getJSON(`/api/sessions/${sid}`);
+      abort.current?.abort();
+      session.current = sid;
+      setMsgs(d.transcript ?? []);
+      setShowHist(false);
+      try { localStorage.setItem("chat_session", sid); } catch { /* storage unavailable */ }
+    } catch { /* deleted or never saved */ }
+  };
+
+  // Reopen the last conversation after a reload
+  useEffect(() => {
+    let sid: string | null = null;
+    try { sid = localStorage.getItem("chat_session"); } catch { /* storage unavailable */ }
+    if (sid) open(sid);
+  }, []);
+
+  const toggleHist = () => {
+    if (!showHist) getJSON("/api/sessions").then(setHist).catch(() => setHist([]));
+    setShowHist(!showHist);
+  };
+
+  const remove = async (sid: string) => {
+    await fetch(`/api/sessions/${sid}`, { method: "DELETE" }).catch(() => {});
+    setHist((h) => h.filter((r) => r.id !== sid));
+    if (session.current === sid) reset();
+  };
 
   const patchLast = (fn: (m: Msg) => void) =>
     setMsgs((prev) => {
@@ -167,6 +221,8 @@ export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: 
     if (session.current) fetch(`/api/sessions/${session.current}/reset`, { method: "POST" });
     session.current = null;
     setMsgs([]);
+    setShowHist(false);
+    try { localStorage.removeItem("chat_session"); } catch { /* storage unavailable */ }
   };
 
   return (
@@ -174,8 +230,28 @@ export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: 
       <div className="card-h">
         دستیار معاملاتی
         <span className="spacer" />
-        {msgs.length > 0 && <button className="btn ghost" style={{ padding: "3px 10px", fontSize: 12 }} onClick={reset}>گفتگوی جدید</button>}
+        <button className={`btn ghost sm ${showHist ? "on" : ""}`} onClick={toggleHist} aria-expanded={showHist}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8m0-5v5h5M12 7v5l3 2" /></svg>
+          گفتگوها
+        </button>
+        {msgs.length > 0 && <button className="btn ghost sm" onClick={reset}>گفتگوی جدید</button>}
       </div>
+      {showHist && (
+        <div className="hist" role="dialog" aria-label="گفتگوهای ذخیره‌شده">
+          {hist.map((r) => (
+            <div key={r.id} className={`hist-row ${r.id === session.current ? "on" : ""}`}>
+              <button className="hist-open" onClick={() => open(r.id)}>
+                <span className="hist-title">{r.title}</span>
+                <span className="muted num">{ago(r.updated)} · {r.turns} پیام</span>
+              </button>
+              <button className="icon-btn hist-del" aria-label="حذف گفتگو" onClick={() => remove(r.id)}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M4 7h16M10 11v6m4-6v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
+              </button>
+            </div>
+          ))}
+          {!hist.length && <div className="card-b muted">هنوز گفتگویی ذخیره نشده.</div>}
+        </div>
+      )}
       <div className="chat-log" ref={log}>
         {msgs.length === 0 && (
           <div className="empty">

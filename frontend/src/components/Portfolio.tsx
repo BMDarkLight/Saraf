@@ -124,11 +124,26 @@ function hhmm(iso: string): string {
   return new Date(iso).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
 }
 
-/** The real Wallex account (read-only) and the autonomous engine's live status. */
+const EXIT_FA: Record<string, string> = {
+  take_profit: "حد سود", stop_loss: "حد ضرر", trailing_stop: "حد ضرر متحرک", time_stop: "پایان زمان",
+  ai_exit: "خروج با نظر AI", challenge_end: "تسویه پایان چالش", drawdown_halt: "توقف اضطراری (افت سرمایه)", session_end: "پایان جلسه",
+};
+
+function Section({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
+  return (
+    <div className="eng-sec">
+      <div className="eng-sec-h">{title}{count != null && <span className="count num">{count}</span>}</div>
+      {children}
+    </div>
+  );
+}
+
+/** The real Wallex account (read-only) and the autonomous engine: stats, order queue, positions, trades, log. */
 function RealAccount({ acc }: { acc: any }) {
   if (!acc) return <div className="card-b muted">در حال بارگذاری…</div>;
   const e = acc.engine;
   const ret = e?.equity_tmn != null ? (100 * (e.equity_tmn - e.capital_tmn)) / e.capital_tmn : null;
+  const st = e?.stats ?? {};
   return (
     <>
       {!acc.has_key && <div className="card-b muted">کلید API والکس تنظیم نشده است.</div>}
@@ -144,59 +159,96 @@ function RealAccount({ acc }: { acc: any }) {
             .map(([asset, b]: any) => (
               <div className="bal-row" key={asset}>
                 <b className="ltr">{asset}</b>
-                <span className="num">{compact(b.total)}{b.locked ? <span className="muted" style={{ fontSize: 11 }}> (قفل {compact(b.locked)})</span> : null}</span>
+                <span className="num">{price(b.total)}{b.locked ? <span className="muted" style={{ fontSize: 11 }}> (قفل {compact(b.locked)})</span> : null}</span>
               </div>
             ))}
         </>
       )}
       {e && (
-        <div className="card-b" style={{ display: "grid", gap: 8 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <div className="card-b eng">
+          <div className="eng-head">
             <b>موتور معاملاتی خودکار</b>
-            <span className={`chip ${e.mode === "live" ? "live" : ""}`} style={{ background: "var(--surface-2)", color: "var(--text)" }}>
+            <span className={`chip mode ${e.mode === "live" ? "live" : ""}`}>
               <span className="dot" />{e.mode === "live" ? "زنده" : "شبیه‌سازی (shadow)"}
             </span>
           </div>
-          <div className="stat-grid num">
-            <div><span>ارزش</span>{price(e.equity_tmn)}</div>
+          <div className="eng-stats num">
+            <div><span>ارزش</span><b>{price(e.equity_tmn)}</b></div>
             <div><span>بازده</span><b className={tone(ret)}>{pct(ret)}</b></div>
-            <div><span>افت از سقف</span>{e.drawdown_pct != null ? `${e.drawdown_pct.toFixed(2)}%` : "—"}</div>
+            <div><span>سود محقق‌شده</span><b className={tone(st.realized_pnl_tmn)}>{price(st.realized_pnl_tmn ?? 0)}</b></div>
+            <div><span>معاملات</span><b>{st.trades ?? 0}</b></div>
+            <div><span>نرخ برد</span><b>{st.win_rate_pct != null ? `${st.win_rate_pct}%` : "—"}</b></div>
+            <div><span>افت از سقف</span><b>{e.drawdown_pct != null ? `${e.drawdown_pct.toFixed(2)}%` : "—"}</b></div>
           </div>
           {e.regime && (
-            <div style={{ fontSize: 12 }}>
+            <div className="eng-regime">
               <span className="muted">وضعیت بازار: </span><b>{REGIME_FA[e.regime] ?? e.regime}</b>
-              {e.regime_reason && <div className="muted" style={{ marginTop: 2 }}>{e.regime_reason}</div>}
+              {e.regime_reason && <div className="muted clamp">{e.regime_reason}</div>}
             </div>
           )}
           {e.halted && <div className="err-box" style={{ margin: 0 }}>موتور به دلیل افت سرمایه متوقف شده است.</div>}
-          {(e.positions ?? []).map((p: any) => (
-            <div className="pos" key={p.id} style={{ padding: 0 }}>
-              <div className="pos-top">
+
+          <Section title="صف سفارش‌ها" count={e.pending?.length ?? 0}>
+            {(e.pending ?? []).map((o: any, i: number) => (
+              <div className="eng-row" key={i}>
                 <span className="side LONG">خرید</span>
-                <b className="ltr">{p.symbol}</b>
-                <span className="muted" style={{ fontSize: 11 }}>{p.setup}</span>
+                <b className="ltr">{o.symbol}</b>
+                <span className="num">@ {price(o.limit)}</span>
+                <span className="spacer" />
+                <span className="muted num">{o.amount_tmn ? `${compact(o.amount_tmn)} TMN` : ""}</span>
               </div>
-              <div className="stat-grid num">
-                <div><span>ورود</span>{price(p.entry_price)}</div>
-                <div><span>حد سود</span>{price(p.target)}</div>
-                <div><span>حد ضرر</span>{price(p.stop)}</div>
+            ))}
+            {!e.pending?.length && <div className="muted empty-line">سفارش لیمیتی در صف نیست.</div>}
+          </Section>
+
+          <Section title="پوزیشن‌های باز" count={e.positions?.length ?? 0}>
+            {(e.positions ?? []).map((p: any) => (
+              <div className="pos" key={p.id} style={{ padding: "6px 0" }}>
+                <div className="pos-top">
+                  <span className="side LONG">خرید</span>
+                  <b className="ltr">{p.symbol}</b>
+                  <span className="spacer" style={{ flex: 1 }} />
+                  {p.unrealized_pnl_tmn != null && (
+                    <span className={`num ${tone(p.unrealized_pnl_tmn)}`} style={{ fontWeight: 700 }}>
+                      {price(p.unrealized_pnl_tmn)} <small>({pct(p.unrealized_pnl_pct)})</small>
+                    </span>
+                  )}
+                </div>
+                <div className="stat-grid num">
+                  <div><span>ورود</span>{price(p.entry_price)}</div>
+                  <div><span>حد سود</span>{price(p.target)}</div>
+                  <div><span>حد ضرر</span>{price(p.stop)}</div>
+                </div>
               </div>
-            </div>
-          ))}
-          {!e.positions?.length && <div className="muted" style={{ fontSize: 12 }}>پوزیشن بازی ندارد.</div>}
-          <div style={{ fontSize: 12, display: "grid", gap: 6 }}>
-            <span className="muted">آخرین تصمیم‌ها</span>
+            ))}
+            {!e.positions?.length && <div className="muted empty-line">پوزیشن بازی ندارد.</div>}
+          </Section>
+
+          <Section title="معاملات انجام‌شده" count={st.trades ?? 0}>
+            {(e.trades ?? []).slice(0, 10).map((tr: any) => (
+              <div className="eng-row" key={tr.id}>
+                <b className="ltr">{tr.symbol}</b>
+                <span className="muted">{EXIT_FA[tr.reason] ?? tr.reason}</span>
+                <span className="spacer" />
+                <span className={`num ${tone(tr.pnl_tmn)}`}>{price(tr.pnl_tmn)} <small>({pct(tr.pnl_pct)})</small></span>
+              </div>
+            ))}
+            {!e.trades?.length && <div className="muted empty-line">هنوز معامله‌ای بسته نشده.</div>}
+          </Section>
+
+          <Section title="آخرین تصمیم‌ها">
             {(e.events ?? []).slice(0, 12).map((ev: any, i: number) => (
-              <div key={i} style={{ borderTop: "1px solid var(--border-soft)", paddingTop: 6 }}>
+              <div className="eng-ev" key={i}>
                 <span className="muted num">{hhmm(ev.time)}</span>{" "}
                 <b>{EVENT_FA[ev.event] ?? ev.event}</b>{" "}
                 {ev.symbol && <span className="ltr">{ev.symbol}</span>}{" "}
                 {ev.action && <span className={ev.action === "TAKE" ? "up" : "muted"}>{ev.action}</span>}
                 {ev.pnl_pct != null && <span className={tone(ev.pnl_pct)}> {pct(ev.pnl_pct)}</span>}
-                {ev.reason && <div className="muted" style={{ marginTop: 2 }}>{String(ev.reason).slice(0, 220)}</div>}
+                {ev.reason && <div className="muted clamp">{String(ev.reason)}</div>}
               </div>
             ))}
-          </div>
+            {!e.events?.length && <div className="muted empty-line">موتور تازه شروع شده؛ تصمیم‌ها با بسته شدن هر کندل ۱۵ دقیقه‌ای اینجا می‌آیند.</div>}
+          </Section>
         </div>
       )}
     </>

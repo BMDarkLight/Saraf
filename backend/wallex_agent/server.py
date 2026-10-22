@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
+import csv
 import json
 import time
 from pathlib import Path
@@ -88,8 +89,11 @@ async def chat(body: ChatIn):
 
     async def gen():
         yield {"type": "session", "session_id": session.id}
-        async for ev in agent.chat(session, body.message):
-            yield ev
+        try:
+            async for ev in agent.chat(session, body.message):
+                yield ev
+        finally:
+            agent.save(session)
     return sse(gen())
 
 
@@ -106,8 +110,12 @@ async def decide_action(action_id: str, body: ActionIn):
 
     async def gen():
         yield {"type": "action_update", "action": action.public()}
-        async for ev in agent.after_action(action):
-            yield ev
+        try:
+            async for ev in agent.after_action(action):
+                yield ev
+        finally:
+            if action.session_id in agent.sessions:
+                agent.save(agent.sessions[action.session_id])
     return sse(gen())
 
 
@@ -118,8 +126,39 @@ async def list_actions(session_id: str | None = None):
 
 @app.post("/api/sessions/{session_id}/reset")
 async def reset_session(session_id: str):
+    """Leaves the conversation (it stays saved and listed); drops only the in-memory copy."""
     agent.sessions.pop(session_id, None)
     return {"ok": True}
+
+
+@app.get("/api/sessions")
+async def list_sessions():
+    return agent.store.list()
+
+
+@app.get("/api/sessions/{session_id}")
+async def get_session(session_id: str):
+    d = agent.store.load(session_id)
+    if d is None:
+        raise HTTPException(404, "unknown session")
+    return {"id": d["id"], "title": d.get("title"), "updated": d.get("updated"), "transcript": d.get("transcript", [])}
+
+
+class TranscriptIn(BaseModel):
+    transcript: list
+
+
+@app.put("/api/sessions/{session_id}")
+async def save_transcript(session_id: str, body: TranscriptIn):
+    if not agent.store.save_transcript(session_id, body.transcript):
+        raise HTTPException(404, "unknown session")
+    return {"ok": True}
+
+
+@app.delete("/api/sessions/{session_id}")
+async def delete_session(session_id: str):
+    agent.sessions.pop(session_id, None)
+    return {"ok": agent.store.delete(session_id)}
 
 
 @app.get("/api/config")
@@ -127,7 +166,8 @@ async def config():
     return {"spot_mode": settings.spot_mode, "futures_mode": settings.futures_mode,
             "model": settings.llm_model, "require_confirmation": settings.require_confirmation,
             "has_wallex_key": bool(settings.wallex_api_key), "llm_configured": bool(settings.llm_api_key),
-            "max_leverage": settings.max_leverage, "tools": sorted(agent_tools.TOOLS)}
+            "max_leverage": settings.max_leverage, "tools": sorted(agent_tools.TOOLS),
+            "engine_mode": (engine_status() or {}).get("mode")}
 
 
 # --------------------------------------------------------------- dashboard
@@ -152,6 +192,16 @@ async def known_symbol(symbol: str) -> str:
 async def depth(symbol: str, levels: int = 12):
     sym = await known_symbol(symbol)
     return await guarded(analytics.order_book_analysis(ctx.client, sym, max(1, min(levels, 50))))
+
+
+@app.get("/api/trades/{symbol}")
+async def market_trades(symbol: str, limit: int = 30):
+    """The market's latest public trades (newest first) for the trade tape."""
+    sym = await known_symbol(symbol)
+    rows = await guarded(ctx.client.trades(sym))
+    out = [{"time": t.get("timestamp"), "price": float(t["price"]), "qty": float(t["quantity"]),
+            "side": "buy" if t.get("isBuyOrder") else "sell"} for t in rows[: max(1, min(limit, 100))]]
+    return {"symbol": sym, "trades": out}
 
 
 @app.get("/api/candles/{symbol}")
@@ -226,14 +276,28 @@ def engine_status() -> dict | None:
                         "pnl_pct": e.get("pnl_pct"), "price": e.get("price")}.items() if v is not None})
             if len(events) >= 30:
                 break
+    trades = []
+    if (d / "trades.csv").exists():
+        with (d / "trades.csv").open() as f:
+            trades = list(csv.DictReader(f))
+    pnls = [float(t["pnl_tmn"] or 0) for t in trades]
+    stats = {"trades": len(trades), "wins": sum(1 for x in pnls if x > 0), "realized_pnl_tmn": round(sum(pnls)),
+             "win_rate_pct": round(100 * sum(1 for x in pnls if x > 0) / len(pnls), 1) if pnls else None}
+    pending = [{"symbol": o.get("symbol"), "setup": o.get("setup"), "limit": o.get("limit"),
+                "amount_tmn": o.get("amount_tmn"), "placed_at": o.get("placed_at"),
+                "expires_at": o.get("expires_at")} for o in state.get("pending", {}).values()]
+    recent = [{"id": t["trade_id"], "symbol": t["symbol"], "setup": t["setup"], "entry_time": t["entry_time"],
+               "exit_time": t["exit_time"], "entry_price": float(t["entry_price"] or 0),
+               "exit_price": float(t["exit_price"] or 0), "pnl_tmn": float(t["pnl_tmn"] or 0),
+               "pnl_pct": float(t["pnl_pct"] or 0), "reason": t["exit_reason"]} for t in reversed(trades[-20:])]
     return {"mode": d.name, "updated": (d / "state.json").stat().st_mtime,
             "capital_tmn": settings.engine_capital_tmn,
             "equity_tmn": float(last[1]) if last else None, "cash_tmn": float(last[2]) if last else None,
             "drawdown_pct": float(last[4]) if last else None,
             "regime": state.get("regime"), "regime_reason": state.get("regime_reason"),
             "halted": state.get("halted"), "pause_until": state.get("pause_until"),
-            "positions": list(state.get("positions", {}).values()), "closed": state.get("closed", [])[-10:],
-            "events": events}
+            "positions": list(state.get("positions", {}).values()), "pending": pending,
+            "trades": recent, "stats": stats, "events": events}
 
 
 @app.get("/api/account")
@@ -247,8 +311,18 @@ async def account():
             out["error"] = str(e)
     try:
         out["engine"] = engine_status()
-    except (OSError, ValueError) as e:
+    except (OSError, ValueError, KeyError) as e:
         out["engine_error"] = str(e)
+    eng = out.get("engine")
+    if eng and eng["positions"]:
+        with contextlib.suppress(WallexError):
+            markets = await ctx.client.markets()
+            for p in eng["positions"]:   # mark open positions to the last price
+                last = float((markets.get(p["symbol"]) or {}).get("stats", {}).get("lastPrice") or 0)
+                if last:
+                    p["mark_price"] = last
+                    p["unrealized_pnl_tmn"] = round((last - p["entry_price"]) * p["qty"])
+                    p["unrealized_pnl_pct"] = round(100 * (last / p["entry_price"] - 1), 2)
     return out
 
 

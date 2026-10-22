@@ -39,20 +39,68 @@ export function DepthView({ d, rows = 8 }: { d: any; rows?: number }) {
   );
 }
 
-export function OrderBook({ symbol }: { symbol: string }) {
+function TradeTape({ symbol }: { symbol: string }) {
   const [d, setD] = useState<any>(null);
   useEffect(() => {
+    let live = true;
+    setD(null);
+    const load = () => getJSON(`/api/trades/${symbol}?limit=24`).then((x) => live && setD(x)).catch(() => {});
+    load();
+    const t = setInterval(load, 4000);
+    return () => { live = false; clearInterval(t); };
+  }, [symbol]);
+  const rows: any[] = d?.trades ?? [];
+  const dec = bookDecimals(rows.map((r) => r.price));
+  const buys = rows.filter((r) => r.side === "buy").reduce((s, r) => s + r.price * r.qty, 0);
+  const sells = rows.filter((r) => r.side === "sell").reduce((s, r) => s + r.price * r.qty, 0);
+  const buyShare = buys + sells ? (100 * buys) / (buys + sells) : 50;
+  if (!d) return <div className="card-b muted">…</div>;
+  return (
+    <div className="ob">
+      <div className="ob-row tape muted" style={{ fontSize: 11 }}><span>Time</span><span>Price</span><span>Amount</span></div>
+      {rows.map((r, i) => (
+        <div className="ob-row tape" key={`${r.time}-${i}`}>
+          <span className="muted">{new Date(r.time).toLocaleTimeString("en-GB", { hour12: false })}</span>
+          <span className={r.side === "buy" ? "up" : "down"}>{bookPrice(r.price, dec)}</span>
+          <span>{compact(r.qty)}</span>
+        </div>
+      ))}
+      {!rows.length && <div className="card-b muted">معامله‌ای ثبت نشده</div>}
+      <div className="imb" title="buy / sell value in these trades">
+        <span style={{ width: `${buyShare}%`, background: "var(--up)" }} />
+        <span style={{ flex: 1, background: "var(--down)" }} />
+      </div>
+      <div className="ob-row muted" style={{ fontSize: 11, paddingBottom: 8 }}>
+        <span>Buys {buyShare.toFixed(0)}%</span><span>Sells {(100 - buyShare).toFixed(0)}%</span>
+      </div>
+    </div>
+  );
+}
+
+export function OrderBook({ symbol }: { symbol: string }) {
+  const [view, setView] = useState<"depth" | "trades">("depth");
+  const [d, setD] = useState<any>(null);
+  useEffect(() => {
+    if (view !== "depth") return;
     let live = true;
     setD(null);
     const load = () => getJSON(`/api/depth/${symbol}?levels=10`).then((x) => live && setD(x)).catch(() => {});
     load();
     const t = setInterval(load, 4000);
     return () => { live = false; clearInterval(t); };
-  }, [symbol]);
+  }, [symbol, view]);
   return (
     <div className="card">
-      <div className="card-h">عمق بازار <span className="spacer" /><span className="ltr muted" style={{ fontWeight: 500 }}>{symbol}</span></div>
-      {d && !d.error ? <DepthView d={d} rows={6} /> : <div className="card-b muted">…</div>}
+      <div className="card-h">
+        <div className="seg" role="tablist">
+          <button className={view === "depth" ? "on" : ""} onClick={() => setView("depth")}>عمق بازار</button>
+          <button className={view === "trades" ? "on" : ""} onClick={() => setView("trades")}>معاملات اخیر</button>
+        </div>
+        <span className="spacer" />
+        <span className="ltr muted" style={{ fontWeight: 500 }}>{symbol}</span>
+      </div>
+      {view === "trades" ? <TradeTape symbol={symbol} />
+        : d && !d.error ? <DepthView d={d} rows={6} /> : <div className="card-b muted">…</div>}
     </div>
   );
 }

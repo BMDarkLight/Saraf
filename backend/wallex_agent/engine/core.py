@@ -229,6 +229,7 @@ class Engine:
                 self.journal.log("error", now, symbol=cand.symbol, error=f"limit buy failed: {e}")
                 return
             self.pending[oid] = {**plan, "order_id": oid, "limit": limit, "ask_at_order": quote["ask"], "placed_at": now,
+                                 "amount_tmn": sz.quote_amount,
                                  "expires_at": now + self.s.engine_entry_timeout_bars * self.tf * 60}
             self.journal.log("entry_order", now, symbol=cand.symbol, setup=cand.setup, order_id=oid, limit=limit,
                              amount_tmn=sz.quote_amount, expires_in_bars=self.s.engine_entry_timeout_bars,

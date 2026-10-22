@@ -206,3 +206,18 @@ async def test_chat_and_action_endpoints(http, agent):
     r = await http.post("/api/ui/ticket", json={"market": "futures", "symbol": "BTCUSDT", "side": "LONG",
                                                  "amount": 20, "leverage": 50})
     assert r.json()["ok"] is False
+
+
+def test_session_store_roundtrip(tmp_path):
+    from wallex_agent.agent.sessions import SessionStore
+
+    st = SessionStore(tmp_path)
+    sid = "ab12" * 8
+    assert st.save_transcript(sid, [{"role": "user"}]) is False          # unknown until the agent saved it
+    st.save_history(sid, [{"role": "user", "content": "قیمت تتر\nچنده"}, {"role": "assistant", "content": "x"}])
+    assert st.save_transcript(sid, [{"role": "user", "text": "قیمت تتر"}])
+    [row] = st.list()
+    assert row["title"] == "قیمت تتر" and row["turns"] == 1
+    assert st.load(sid)["transcript"][0]["text"] == "قیمت تتر"
+    assert st.load("../../etc/passwd") is None and st._path("../x") is None
+    assert st.delete(sid) and st.list() == []

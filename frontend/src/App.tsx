@@ -53,13 +53,16 @@ export default function App() {
         <span className="spacer" />
         {cfg && (
           <>
-            <span className={`chip hide-xs ${cfg.spot_mode === "live" ? "live" : ""}`}><span className="dot" />اسپات: {cfg.spot_mode === "live" ? "واقعی" : "آزمایشی"}</span>
-            <span className={`chip hide-xs ${cfg.futures_mode === "live" ? "live" : ""}`}><span className="dot" />فیوچرز: {cfg.futures_mode === "live" ? "واقعی" : "آزمایشی"}</span>
-            <span className={`chip show-xs ${cfg.spot_mode === "live" || cfg.futures_mode === "live" ? "live" : ""}`}>
-              <span className="dot" />
-              {cfg.spot_mode === cfg.futures_mode
-                ? (cfg.spot_mode === "live" ? "معامله واقعی" : "آزمایشی")
-                : `اسپات ${cfg.spot_mode === "live" ? "واقعی" : "آزمایشی"} · فیوچرز ${cfg.futures_mode === "live" ? "واقعی" : "آزمایشی"}`}
+            {cfg.engine_mode && (
+              <span className={`chip ${cfg.engine_mode === "live" ? "live" : ""}`} title="موتور معاملاتی خودکار روی حساب اعتبار معاملاتی">
+                <span className="dot" />موتور: {cfg.engine_mode === "live" ? "زنده" : "شبیه‌سازی"}
+              </span>
+            )}
+            <span
+              className={`chip hide-xs ${cfg.spot_mode === "live" || cfg.futures_mode === "live" ? "live" : ""}`}
+              title={`معاملات دستیار چت — اسپات: ${cfg.spot_mode === "live" ? "واقعی" : "آزمایشی"}، فیوچرز: ${cfg.futures_mode === "live" ? "واقعی" : "آزمایشی"}`}
+            >
+              <span className="dot" />دستیار: {cfg.spot_mode === "live" ? "واقعی" : "آزمایشی"}
             </span>
             <span className="chip hide-sm ltr">{cfg.model}</span>
           </>
