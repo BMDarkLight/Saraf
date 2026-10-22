@@ -2,6 +2,7 @@
 generative-UI and alert tools. Market data comes from the live public Wallex API."""
 
 import json
+import os
 
 import pytest
 
@@ -61,6 +62,7 @@ def test_compat_history_has_no_tool_roles():
 
 
 # ------------------------------------------------------------ generative UI
+@pytest.mark.skipif(bool(os.environ.get("CI")), reason="calls the live Wallex API, unreliable from GitHub's US runners")
 async def test_genui_tools_render_and_hide_payload_from_model(agent):
     cases = {
         "show_comparison_chart": dict(symbols="BTCUSDT,ETHUSDT,NOPEUSDT", hours=24),

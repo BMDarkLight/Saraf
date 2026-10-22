@@ -40,11 +40,7 @@ export function Portfolio({ refreshKey, onAsk, assistantLive, onModeChanged }: {
       </div>
       <div className="scroll" style={{ flex: 1 }}>
         {tab === "account" ? (
-          <RealAccount acc={acc} reload={() => {
-            onModeChanged?.();
-            // poll quickly while the engine restarts, then the normal 15s cadence resumes
-            for (const ms of [3000, 7000, 12000, 20000, 30000]) setTimeout(() => reloadAcc.current(), ms);
-          }} />
+          <RealAccount acc={acc} />
         ) : (
           <>
             {d?.spot_error && <div className="err-box">{d.spot_error}</div>}
@@ -96,64 +92,7 @@ function Section({ title, count, children }: { title: string; count?: number; ch
 }
 
 /** The real Wallex account (read-only) and the autonomous engine: stats, order queue, positions, trades, log. */
-function ModeSwitch({ mode, onChanged }: { mode: string; onChanged: () => void }) {
-  const [ask, setAsk] = useState<"live" | "shadow" | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [err, setErr] = useState("");
-  // after a switch, wait until the engine reports the new mode (it restarts in a few seconds)
-  useEffect(() => { if (busy && busy === mode) setBusy(null); }, [mode, busy]);
-  useEffect(() => {
-    if (!busy) return;
-    const t = setTimeout(() => { setBusy(null); setErr("موتور هنوز با حالت جدید بالا نیامده؛ چند لحظه بعد دوباره نگاه کنید."); }, 60000);
-    return () => clearTimeout(t);
-  }, [busy]);
-
-  const apply = async (m: "live" | "shadow") => {
-    setAsk(null); setErr(""); setBusy(m);
-    try {
-      const r = await fetch("/api/engine/mode", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode: m, confirm: m === "live" ? "LIVE" : "" }),
-      });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`);
-      onChanged();
-    } catch (e: any) { setBusy(null); setErr(e.message); }
-  };
-
-  return (
-    <>
-      <div className="seg mode-switch" role="radiogroup" aria-label="حالت موتور">
-        <button role="radio" aria-checked={mode !== "live"} className={mode !== "live" ? "on" : ""} disabled={!!busy}
-          onClick={() => mode === "live" && setAsk("shadow")}>شبیه‌سازی</button>
-        <button role="radio" aria-checked={mode === "live"} className={mode === "live" ? "on live" : ""} disabled={!!busy}
-          onClick={() => mode !== "live" && setAsk("live")}>
-          <span className="dot" />زنده
-        </button>
-      </div>
-      {busy && <div className="mode-note muted">در حال راه‌اندازی دوباره موتور در حالت {busy === "live" ? "زنده" : "شبیه‌سازی"}…</div>}
-      {err && <div className="err-box" style={{ margin: 0 }}>{err}</div>}
-      {ask && (
-        <div className={`mode-confirm ${ask}`}>
-          {ask === "live" ? (
-            <p><b>همه چیز واقعی شود؟</b> موتور از این لحظه خودکار و بدون تأیید شما روی حساب اعتبار معاملاتی سفارش واقعی
-              ثبت می‌کند، و معاملاتی که در چت تأیید کنید هم واقعی اجرا می‌شوند.</p>
-          ) : (
-            <p>موتور و چت به شبیه‌سازی برمی‌گردند و سفارش واقعی جدیدی ثبت نمی‌شود. <b>پوزیشن‌ها و سفارش‌های باز واقعی
-              خودکار بسته نمی‌شوند</b>؛ با برگشت به حالت زنده دوباره مدیریت می‌شوند.</p>
-          )}
-          <div className="mode-confirm-actions">
-            <button className={`btn ${ask === "live" ? "danger" : "primary"}`} onClick={() => apply(ask)}>
-              {ask === "live" ? "بله، زنده شود" : "برگشت به شبیه‌سازی"}
-            </button>
-            <button className="btn ghost" onClick={() => setAsk(null)}>انصراف</button>
-          </div>
-        </div>
-      )}
-    </>
-  );
-}
-
-function RealAccount({ acc, reload }: { acc: any; reload: () => void }) {
+function RealAccount({ acc }: { acc: any }) {
   if (!acc) return <div className="card-b muted">در حال بارگذاری…</div>;
   const e = acc.engine;
   const ret = e?.equity_tmn != null ? (100 * (e.equity_tmn - e.capital_tmn)) / e.capital_tmn : null;
@@ -183,8 +122,9 @@ function RealAccount({ acc, reload }: { acc: any; reload: () => void }) {
           <div className="eng-head">
             <b>موتور معاملاتی خودکار</b>
             <span className="spacer" />
+            <span className={`chip mode ${e.mode === "live" ? "live" : ""}`}><span className="dot" />{e.mode === "live" ? "زنده" : "شبیه‌سازی"}</span>
           </div>
-          <ModeSwitch mode={e.mode} onChanged={reload} />
+
           <div className="eng-stats num">
             <div><span>ارزش</span><b>{price(e.equity_tmn)}</b></div>
             <div><span>بازده</span><b className={tone(ret)}>{pct(ret)}</b></div>
