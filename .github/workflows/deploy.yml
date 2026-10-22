@@ -14,22 +14,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # on the VPS too: it reaches the live Wallex API (GitHub's US runners time out on it); the frontend
+  # type-check and build run inside deploy.sh, which aborts before touching the app if they fail
   test:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, wallex-vps]
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
       - name: Backend tests
         working-directory: backend
-        run: uv sync --frozen && uv run pytest -q
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
-      - name: Frontend build
-        working-directory: frontend
-        run: npm ci --no-audit --no-fund && npm run build
+        run: /root/.local/bin/uv sync --frozen && /root/.local/bin/uv run pytest -q
 
   deploy:
     needs: test
