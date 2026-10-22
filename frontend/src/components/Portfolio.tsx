@@ -2,8 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { getJSON } from "../api";
 import { compact, pct, price, tone } from "../format";
 
-export function Portfolio({ refreshKey, onAsk, assistantLive }: { refreshKey: number; onAsk: (text: string) => void; assistantLive?: boolean }) {
-  const [tab, setTab] = useState<"account" | "futures" | "spot">("account");
+export function Portfolio({ refreshKey, onAsk, assistantLive, onModeChanged }: {
+  refreshKey: number; onAsk: (text: string) => void; assistantLive?: boolean; onModeChanged?: () => void;
+}) {
+  const [tab, setTab] = useState<"account" | "spot">("account");
   const [d, setD] = useState<any>(null);
   const [acc, setAcc] = useState<any>(null);
   const reloadAcc = useRef<() => void>(() => {});
@@ -34,65 +36,15 @@ export function Portfolio({ refreshKey, onAsk, assistantLive }: { refreshKey: nu
         <div className="seg">
           <button className={tab === "account" ? "on" : ""} onClick={() => setTab("account")}>حساب والکس</button>
           {!assistantLive && <button className={tab === "spot" ? "on" : ""} onClick={() => setTab("spot")}>اسپات آزمایشی</button>}
-          <button className={tab === "futures" ? "on" : ""} onClick={() => setTab("futures")}>فیوچرز آزمایشی</button>
         </div>
       </div>
       <div className="scroll" style={{ flex: 1 }}>
         {tab === "account" ? (
           <RealAccount acc={acc} reload={() => {
+            onModeChanged?.();
             // poll quickly while the engine restarts, then the normal 15s cadence resumes
             for (const ms of [3000, 7000, 12000, 20000, 30000]) setTimeout(() => reloadAcc.current(), ms);
           }} />
-        ) : tab === "futures" ? (
-          <>
-            {d?.futures_error && <div className="err-box">{d.futures_error}</div>}
-            {Object.entries(fw).map(([q, w]: any) => (
-              <div className="total" key={q}>
-                <span className="muted">ارزش حساب ({q})</span>
-                <span className="num">
-                  <b>{price(w.equity)}</b>{" "}
-                  <span className={tone(w.unrealized_pnl)} style={{ fontSize: 12 }}>{w.unrealized_pnl ? price(w.unrealized_pnl) : ""}</span>
-                </span>
-              </div>
-            ))}
-            {(d?.positions ?? []).map((p: any) => (
-              <div className="pos" key={p.id}>
-                <div className="pos-top">
-                  <span className={`side ${p.side}`}>{p.side === "LONG" ? "لانگ" : "شورت"}</span>
-                  <b className="ltr">{p.symbol}</b>
-                  <span className="muted num">x{p.leverage}</span>
-                  <span className="spacer" style={{ flex: 1 }} />
-                  <span className={`num ${tone(p.unrealized_pnl)}`} style={{ fontWeight: 700 }}>
-                    {price(p.unrealized_pnl)} <small>({pct(p.roe_percent, 1)})</small>
-                  </span>
-                </div>
-                <div className="stat-grid num">
-                  <div><span>ورود</span>{price(p.entry_price)}</div>
-                  <div><span>قیمت فعلی</span>{price(p.mark_price)}</div>
-                  <div><span>لیکوئید</span>{price(p.liquidation_price)}</div>
-                  <div><span>حد سود</span>{p.take_profit ? price(p.take_profit) : "—"}</div>
-                  <div><span>حد ضرر</span>{p.stop_loss ? price(p.stop_loss) : "—"}</div>
-                  <div><span>مارجین</span>{price(p.margin)}</div>
-                </div>
-                <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-                  <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 12 }}
-                    onClick={() => onAsk(`پوزیشن ${p.id} (${p.symbol}) رو کامل ببند`)}>بستن با ایجنت</button>
-                  <button className="btn ghost" style={{ padding: "4px 10px", fontSize: 12 }}
-                    onClick={() => onAsk(`برای پوزیشن ${p.id} (${p.symbol}) با توجه به ATR و حمایت/مقاومت، حد سود و ضرر مناسب پیشنهاد بده و تنظیم کن`)}>
-                    تنظیم TP/SL
-                  </button>
-                </div>
-              </div>
-            ))}
-            {d && !d.positions?.length && !d.futures_error && <div className="card-b muted">پوزیشن بازی ندارید.</div>}
-            {(d?.events ?? []).length > 0 && (
-              <div className="card-b" style={{ fontSize: 12 }}>
-                {d.events.slice(0, 5).map((e: any, i: number) => (
-                  <div key={i} className="muted ltr">{e.reason ?? e.type} {e.symbol ?? ""} {e.realized_pnl != null ? price(e.realized_pnl) : ""}</div>
-                ))}
-              </div>
-            )}
-          </>
         ) : (
           <>
             {d?.spot_error && <div className="err-box">{d.spot_error}</div>}
@@ -183,10 +135,10 @@ function ModeSwitch({ mode, onChanged }: { mode: string; onChanged: () => void }
       {ask && (
         <div className={`mode-confirm ${ask}`}>
           {ask === "live" ? (
-            <p><b>معامله با پول واقعی.</b> موتور از این لحظه به‌صورت خودکار و بدون تأیید شما روی حساب اعتبار معاملاتی
-              سفارش واقعی ثبت می‌کند. پوزیشن‌های حالت شبیه‌سازی منتقل نمی‌شوند.</p>
+            <p><b>همه چیز واقعی شود؟</b> موتور از این لحظه خودکار و بدون تأیید شما روی حساب اعتبار معاملاتی سفارش واقعی
+              ثبت می‌کند، و معاملاتی که در چت تأیید کنید هم واقعی اجرا می‌شوند.</p>
           ) : (
-            <p>موتور به حالت شبیه‌سازی برمی‌گردد و سفارش واقعی جدیدی ثبت نمی‌کند. <b>پوزیشن‌ها و سفارش‌های باز واقعی
+            <p>موتور و چت به شبیه‌سازی برمی‌گردند و سفارش واقعی جدیدی ثبت نمی‌شود. <b>پوزیشن‌ها و سفارش‌های باز واقعی
               خودکار بسته نمی‌شوند</b>؛ با برگشت به حالت زنده دوباره مدیریت می‌شوند.</p>
           )}
           <div className="mode-confirm-actions">

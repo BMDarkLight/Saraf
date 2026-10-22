@@ -8,6 +8,7 @@ import contextlib
 import shutil
 import csv
 import json
+import os
 import time
 from pathlib import Path
 from typing import Literal
@@ -28,10 +29,20 @@ from .news import web
 from .wallex import WallexError
 
 settings = get_settings()
-# the UI's assistant switch (test/real spot) survives restarts and deploys in data/
-ASSISTANT_MODE_FILE = ROOT / "data" / "assistant_mode.json"
-with contextlib.suppress(OSError, ValueError, KeyError):
-    settings.spot_mode = json.loads(ASSISTANT_MODE_FILE.read_text())["spot"]
+ENGINE_MODE_FILE = ROOT / "data" / "engine" / "mode.env"
+
+
+def requested_engine_mode() -> str:
+    """The engine's configured mode: the UI switch (data/engine/mode.env) or ENGINE_RUN_ARGS from .env."""
+    try:
+        args = ENGINE_MODE_FILE.read_text()
+    except OSError:
+        args = os.environ.get("ENGINE_RUN_ARGS", "")
+    return "live" if "--mode live" in args else "shadow"
+
+
+# One mode for the whole app: when the engine trades for real, so do the chat assistant's spot trades
+settings.spot_mode = "live" if requested_engine_mode() == "live" and settings.wallex_api_key else "paper"
 ctx = AppContext.build(settings)
 agent = Agent(ctx)
 futures_events: collections.deque = collections.deque(maxlen=50)
@@ -173,7 +184,7 @@ async def config():
             "model": settings.llm_model, "require_confirmation": settings.require_confirmation,
             "has_wallex_key": bool(settings.wallex_api_key), "llm_configured": bool(settings.llm_api_key),
             "max_leverage": settings.max_leverage, "tools": sorted(agent_tools.TOOLS),
-            "engine_mode": (engine_status() or {}).get("mode")}
+            "engine_mode": (engine_status() or {}).get("mode") or requested_engine_mode()}
 
 
 # --------------------------------------------------------------- dashboard
@@ -324,35 +335,17 @@ async def set_engine_mode(body: EngineModeIn):
         raise HTTPException(400, "switching to live needs confirm=LIVE")
     if not shutil.which("systemctl"):
         raise HTTPException(501, "the engine is not running as a systemd service here")
-    f = ROOT / "data" / "engine" / "mode.env"
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(f"ENGINE_RUN_ARGS={MODE_ARGS[body.mode]}\n")
+    ENGINE_MODE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ENGINE_MODE_FILE.write_text(f"ENGINE_RUN_ARGS={MODE_ARGS[body.mode]}\n")
+    # the chat assistant follows the engine: real spot orders in live, paper in shadow
+    settings.spot_mode = "live" if body.mode == "live" else "paper"
+    ctx.spot = LiveSpotBroker(ctx.client) if body.mode == "live" else PaperSpotBroker(ctx.client, settings)
     proc = await asyncio.create_subprocess_exec("systemctl", "restart", ENGINE_SERVICE,
                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     _, err = await proc.communicate()
     if proc.returncode:
         raise HTTPException(500, f"restart failed: {err.decode(errors='ignore')[:300]}")
     return {"ok": True, "mode": body.mode}
-
-
-class AssistantModeIn(BaseModel):
-    spot: Literal["live", "paper"]
-    confirm: str = ""
-
-
-@app.post("/api/assistant/mode")
-async def set_assistant_mode(body: AssistantModeIn):
-    """Switch the chat assistant's spot trading between paper and the real (trade-credit) account, in
-    place: every chat trade still needs the user's approval on its confirmation card."""
-    if body.spot == "live" and body.confirm != "LIVE":
-        raise HTTPException(400, "switching to live needs confirm=LIVE")
-    if body.spot == "live" and not settings.wallex_api_key:
-        raise HTTPException(400, "WALLEX_API_KEY is not set")
-    settings.spot_mode = body.spot
-    ctx.spot = LiveSpotBroker(ctx.client) if body.spot == "live" else PaperSpotBroker(ctx.client, settings)
-    ASSISTANT_MODE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    ASSISTANT_MODE_FILE.write_text(json.dumps({"spot": body.spot}))
-    return {"ok": True, "spot": body.spot}
 
 
 @app.get("/api/account")

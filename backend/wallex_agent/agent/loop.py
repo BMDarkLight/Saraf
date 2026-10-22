@@ -48,10 +48,12 @@ class PendingAction:
     created_at: float = field(default_factory=time.time)
     status: str = "pending"  # pending | executing | executed | rejected | failed | expired
     result: Any = None
+    mode: str = "paper"      # paper | live: what the card shows, and what approval will execute in
 
     def public(self) -> dict:
         return {"id": self.id, "tool": self.tool, "args": self.args, "summary": self.summary,
-                "reason": self.reason, "risk": self.risk, "status": self.status, "result": self.result}
+                "reason": self.reason, "risk": self.risk, "status": self.status, "result": self.result,
+                "mode": self.mode}
 
 
 @dataclass
@@ -209,6 +211,7 @@ class Agent:
                 action = PendingAction(
                     id=uuid.uuid4().hex[:12], session_id=session.id, tool=name, args=args.model_dump(),
                     summary=summary, reason=getattr(args, "reason", None), risk=_jsonable(facts),
+                    mode=self._mode(name),
                 )
                 self.pending[action.id] = action
                 return True, {"status": "awaiting_user_confirmation", "action_id": action.id,
@@ -223,6 +226,9 @@ class Agent:
         except Exception as e:  # tool bugs shouldn't kill the conversation
             return False, {"error": f"{type(e).__name__}: {e}"}, None
 
+    def _mode(self, tool: str) -> str:
+        return (self.ctx.futures if tool.startswith("futures_") else self.ctx.spot).mode
+
     async def execute_action(self, action_id: str, approve: bool) -> PendingAction:
         action = self.pending.get(action_id)
         if not action:
@@ -235,6 +241,10 @@ class Agent:
         if time.time() - action.created_at > ACTION_TTL:
             action.status = "expired"
             action.result = {"error": f"confirmation expired after {ACTION_TTL / 60:g} minutes; prices may have moved"}
+            return action
+        if self._mode(action.tool) != action.mode:   # switched test <-> real after the card was shown
+            action.status = "failed"
+            action.result = {"error": "حالت معامله (آزمایشی/واقعی) بعد از ساخت این کارت عوض شده؛ دوباره درخواست بدهید."}
             return action
         action.status = "executing"  # claimed synchronously, before any await
         t = TOOLS[action.tool]
@@ -258,6 +268,8 @@ class Agent:
         if s.llm_compat_schemas:
             messages = compat_history(messages)
         names = select_tools(list(TOOLS), messages)
+        if self.ctx.spot.mode == "live":   # the credit account is spot-only; no paper futures beside real money
+            names = [n for n in names if not n.startswith("futures_") and n != "show_position_planner"]
         kwargs = dict(model=s.llm_model, messages=messages, tools=openai_tools(s.llm_compat_schemas, names),
                       temperature=s.llm_temperature)
         if s.llm_max_output_tokens:

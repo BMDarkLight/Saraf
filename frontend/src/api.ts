@@ -18,6 +18,7 @@ export interface Action {
   risk: Record<string, any>;
   status: "pending" | "executing" | "executed" | "rejected" | "failed" | "expired";
   result?: any;
+  mode?: "paper" | "live";
 }
 
 export async function getJSON<T = any>(url: string): Promise<T> {

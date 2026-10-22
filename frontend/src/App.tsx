@@ -25,42 +25,43 @@ function initialTheme(): string {
   try { return localStorage.getItem("theme") || "auto"; } catch { return "auto"; }
 }
 
-/** Header chip that switches the chat assistant's spot trades between test and the real credit account. */
-function AssistantSwitch({ live, onChanged }: { live: boolean; onChanged: (spot: string) => void }) {
+/** Header chip for the one app-wide mode: live = the engine and the chat trade real money, shadow = both simulate. */
+function ModeChip({ live, onChanged }: { live: boolean; onChanged: () => void }) {
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
-  const apply = async (spot: "live" | "paper") => {
+  const apply = async (mode: "live" | "shadow") => {
     setBusy(true); setErr("");
     try {
-      const r = await fetch("/api/assistant/mode", {
+      const r = await fetch("/api/engine/mode", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spot, confirm: spot === "live" ? "LIVE" : "" }),
+        body: JSON.stringify({ mode, confirm: mode === "live" ? "LIVE" : "" }),
       });
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`);
-      onChanged(spot);
+      onChanged();
       setOpen(false);
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
   return (
     <span className="mode-pop-wrap">
       <button className={`chip chip-btn ${live ? "live" : ""}`} aria-expanded={open} onClick={() => setOpen(!open)}
-        title="حالت معاملات دستیار چت؛ برای تغییر کلیک کنید">
-        <span className="dot" />دستیار: {live ? "واقعی" : "آزمایشی"}
+        title="حالت کل برنامه؛ برای تغییر کلیک کنید">
+        <span className="dot" />{live ? "معاملات واقعی" : "شبیه‌سازی"}
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
       </button>
       {open && (
         <div className={`mode-pop mode-confirm ${live ? "" : "live"}`} role="dialog">
           {live ? (
-            <p>معاملاتی که از چت تأیید می‌کنید الان <b>واقعی</b> و روی حساب اعتبار معاملاتی اجرا می‌شوند. برگردد به آزمایشی؟</p>
+            <p>همه چیز <b>واقعی</b> است: موتور خودکار و معاملاتی که در چت تأیید می‌کنید روی حساب اعتبار معاملاتی اجرا
+              می‌شوند. برگشت به شبیه‌سازی سفارش واقعی جدیدی ثبت نمی‌کند؛ پوزیشن‌های باز واقعی بسته نمی‌شوند.</p>
           ) : (
-            <p><b>معاملات واقعی از چت.</b> هر معامله‌ای که در کارت تأیید قبول کنید روی حساب اعتبار معاملاتی (همان حساب موتور)
-              با پول واقعی اجرا می‌شود. فیوچرز آزمایشی می‌ماند؛ حساب اعتباری فقط اسپات است.</p>
+            <p><b>همه چیز واقعی شود؟</b> موتور خودکار و معاملات تأییدشده در چت، روی حساب اعتبار معاملاتی با پول واقعی
+              انجام می‌شوند.</p>
           )}
           {err && <div className="err-box" style={{ margin: "0 0 8px" }}>{err}</div>}
           <div className="mode-confirm-actions">
-            <button className={`btn ${live ? "primary" : "danger"}`} disabled={busy} onClick={() => apply(live ? "paper" : "live")}>
-              {busy ? "…" : live ? "برگشت به آزمایشی" : "بله، معاملات چت واقعی شود"}
+            <button className={`btn ${live ? "primary" : "danger"}`} disabled={busy} onClick={() => apply(live ? "shadow" : "live")}>
+              {busy ? "…" : live ? "برگشت به شبیه‌سازی" : "بله، همه چیز واقعی شود"}
             </button>
             <button className="btn ghost" onClick={() => setOpen(false)}>انصراف</button>
           </div>
@@ -78,6 +79,12 @@ export default function App() {
   const [theme, setTheme] = useState(initialTheme);
   const chat = useRef<ChatHandle>(null);
 
+  const reloadCfg = () => {
+    getJSON("/api/config").then(setCfg).catch(() => {});
+    // the engine restarts in the new mode within seconds; pick up its reported mode
+    for (const ms of [4000, 10000, 20000]) setTimeout(() => getJSON("/api/config").then(setCfg).catch(() => {}), ms);
+    setRefresh((x) => x + 1);
+  };
   useEffect(() => { getJSON("/api/config").then(setCfg).catch(() => {}); }, []);
   useEffect(() => {
     if (theme === "auto") document.documentElement.removeAttribute("data-theme");
@@ -98,12 +105,7 @@ export default function App() {
         <span className="spacer" />
         {cfg && (
           <>
-            {cfg.engine_mode && (
-              <span className={`chip ${cfg.engine_mode === "live" ? "live" : ""}`} title="موتور معاملاتی خودکار روی حساب اعتبار معاملاتی">
-                <span className="dot" />موتور: {cfg.engine_mode === "live" ? "زنده" : "شبیه‌سازی"}
-              </span>
-            )}
-            <AssistantSwitch live={cfg.spot_mode === "live"} onChanged={(spot) => setCfg({ ...cfg, spot_mode: spot })} />
+            <ModeChip live={cfg.engine_mode === "live"} onChanged={reloadCfg} />
             <span className="chip hide-sm ltr">{cfg.model}</span>
           </>
         )}
@@ -138,7 +140,7 @@ export default function App() {
           <Chat ref={chat} onTrade={() => setRefresh((x) => x + 1)} onSymbol={setSymbol} />
         </section>
         <section className={`col side-left ${tab === "trade" ? "active" : ""} ${tab !== "markets" ? "side-on" : ""}`}>
-          <Portfolio refreshKey={refresh} onAsk={ask} assistantLive={cfg?.spot_mode === "live"} />
+          <Portfolio refreshKey={refresh} onAsk={ask} assistantLive={cfg?.spot_mode === "live"} onModeChanged={reloadCfg} />
           <OrderBook symbol={symbol} />
           <FearGreed />
         </section>

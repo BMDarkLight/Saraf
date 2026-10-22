@@ -34,17 +34,22 @@ const STATUS_FA: Record<string, string> = {
 
 function ConfirmCard({ action, onDecide, busy }: { action: Action; onDecide: (a: Action, ok: boolean) => void; busy: boolean }) {
   const r = action.risk ?? {};
+  const live = action.mode === "live";
   return (
-    <div className="confirm">
+    <div className={`confirm ${live ? "real" : "test"}`}>
       <div className="confirm-h">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--blue)" strokeWidth="2.2"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></svg>
-        تأیید معامله
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 9v4m0 4h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /></svg>
+        {live ? "تأیید معامله واقعی" : "تأیید معامله آزمایشی"}
+        <span className={`mode-tag ${live ? "real" : "test"}`}>{live ? "پول واقعی" : "شبیه‌سازی"}</span>
         <span className="spacer" style={{ flex: 1 }} />
         <span className={`status ${action.status}`}>{STATUS_FA[action.status]}</span>
       </div>
       <div className="confirm-b">
         <div className="summary">{action.summary}</div>
         {action.reason && <div className="muted" style={{ fontSize: 13 }}>{action.reason}</div>}
+        {live
+          ? <div className="mode-line real">این سفارش روی حساب اعتبار معاملاتی والکس با پول واقعی ثبت می‌شود.</div>
+          : <div className="mode-line test">آزمایشی: روی دفتر سفارش زنده شبیه‌سازی می‌شود و پولی جابه‌جا نمی‌شود.</div>}
         <dl className="kv num">
           {r.reference_price != null && (<><dt>قیمت مرجع</dt><dd>{price(r.reference_price)} {r.quote}</dd></>)}
           {r.estimated_notional != null && (<><dt>ارزش معامله</dt><dd>{price(r.estimated_notional)} {r.quote}</dd></>)}
@@ -57,7 +62,9 @@ function ConfirmCard({ action, onDecide, busy }: { action: Action; onDecide: (a:
       </div>
       {action.status === "pending" && (
         <div className="confirm-actions">
-          <button className="btn primary" disabled={busy} onClick={() => onDecide(action, true)}>تأیید و اجرا</button>
+          <button className={`btn ${live ? "danger" : "primary"}`} disabled={busy} onClick={() => onDecide(action, true)}>
+            {live ? "تأیید و اجرای واقعی" : "تأیید و اجرا (آزمایشی)"}
+          </button>
           <button className="btn ghost" disabled={busy} onClick={() => onDecide(action, false)}>رد</button>
         </div>
       )}

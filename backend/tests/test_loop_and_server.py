@@ -239,7 +239,7 @@ def test_engine_mode_switch_requires_live_confirmation(tmp_path, monkeypatch):
         calls.append(args)
         return Proc()
 
-    monkeypatch.setattr(server, "ROOT", tmp_path)
+    monkeypatch.setattr(server, "ENGINE_MODE_FILE", tmp_path / "data/engine/mode.env")
     monkeypatch.setattr(server.shutil, "which", lambda name: "/bin/systemctl")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     c = TestClient(server.app)
@@ -248,5 +248,7 @@ def test_engine_mode_switch_requires_live_confirmation(tmp_path, monkeypatch):
     assert c.post("/api/engine/mode", json={"mode": "live", "confirm": "LIVE"}).json()["mode"] == "live"
     assert (tmp_path / "data/engine/mode.env").read_text() == "ENGINE_RUN_ARGS=--mode live --confirm-live\n"
     assert calls[-1] == ("systemctl", "restart", "wallex-engine")
+    assert server.ctx.spot.mode == "live" and server.settings.spot_mode == "live"
     assert c.post("/api/engine/mode", json={"mode": "shadow"}).status_code == 200
     assert "--mode shadow" in (tmp_path / "data/engine/mode.env").read_text()
+    assert server.ctx.spot.mode == "paper"   # the chat assistant follows the engine

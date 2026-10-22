@@ -113,7 +113,9 @@ def test_tool_groups_join_when_mentioned_and_stay():
     names = list(TOOLS)
     core = select_tools(names, [{"role": "user", "content": "قیمت تتر"}])
     assert "get_ticker" in core and "futures_open_position" not in core and "render_dashboard" not in core
-    assert len(core) < len(names) - 12
+    assert len(core) <= len(names) - 12
+    # spot orders are always available, however the user phrases it (regression: «تبدیل کن» had none)
+    assert "spot_place_order" in select_tools(names, [{"role": "user", "content": "کل پولمو تبدیل کن تتر"}])
 
     msgs = [{"role": "user", "content": "یه پوزیشن لانگ ETHUSDT با اهرم ۳ باز کن"},
             {"role": "assistant", "content": "", "tool_calls": [{"id": "1", "type": "function",

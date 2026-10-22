@@ -20,7 +20,7 @@ export function DepthView({ d, rows = 8 }: { d: any; rows?: number }) {
       ))}
       <div className="ob-mid">
         <span>{bookPrice(d.mid, dec)}</span>
-        <span className="muted" style={{ fontWeight: 500 }}>اسپرد {d.spread_pct}٪</span>
+        <span className="muted" dir="rtl" style={{ fontWeight: 500 }}>اسپرد <bdi dir="ltr">{d.spread_pct}%</bdi></span>
       </div>
       {bids.map((l: any, i: number) => (
         <div className="ob-row" key={`b${i}`}>
@@ -33,7 +33,7 @@ export function DepthView({ d, rows = 8 }: { d: any; rows?: number }) {
         <span style={{ flex: 1, background: "var(--down)" }} />
       </div>
       <div className="ob-row muted" style={{ fontSize: 11, paddingBottom: 8 }}>
-        <span>خرید ±۱٪: {compact(b1?.bid_value)}</span><span>فروش ±۱٪: {compact(b1?.ask_value)}</span>
+        <span dir="rtl">خرید در ۱٪: <bdi dir="ltr">{compact(b1?.bid_value)}</bdi></span><span dir="rtl">فروش در ۱٪: <bdi dir="ltr">{compact(b1?.ask_value)}</bdi></span>
       </div>
     </div>
   );
@@ -71,7 +71,7 @@ function TradeTape({ symbol }: { symbol: string }) {
         <span style={{ flex: 1, background: "var(--down)" }} />
       </div>
       <div className="ob-row muted" style={{ fontSize: 11, paddingBottom: 8 }}>
-        <span>خرید {buyShare.toFixed(0)}٪</span><span>فروش {(100 - buyShare).toFixed(0)}٪</span>
+        <span dir="rtl">خرید <bdi dir="ltr">{buyShare.toFixed(0)}%</bdi></span><span dir="rtl">فروش <bdi dir="ltr">{(100 - buyShare).toFixed(0)}%</bdi></span>
       </div>
     </div>
   );

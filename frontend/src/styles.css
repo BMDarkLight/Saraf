@@ -472,3 +472,15 @@ input[type="range"] { direction: ltr; }
 }
 .chart-card { flex: none; }
 .col.markets-col > .card:first-child { min-height: 0; flex: 1; }
+
+/* --------------------------------------------- real vs test trade cards */
+.confirm.real { border: 2px solid var(--down); }
+.confirm.real .confirm-h { background: var(--down-soft); color: var(--down); }
+.confirm.test { border-style: dashed; border-color: var(--border); }
+.confirm.test .confirm-h { background: var(--surface-2); color: var(--muted); }
+.mode-tag { font-size: 11px; font-weight: 800; padding: 1px 8px; border-radius: 999px; }
+.mode-tag.real { background: var(--down); color: #fff; }
+.mode-tag.test { background: var(--border-soft); color: var(--muted); }
+.mode-line { font-size: 12px; border-radius: 6px; padding: 4px 8px; }
+.mode-line.real { background: var(--down-soft); color: var(--down); font-weight: 700; }
+.mode-line.test { background: var(--surface-2); color: var(--muted); }
