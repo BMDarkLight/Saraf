@@ -7,6 +7,8 @@ Wants=network-online.target
 WorkingDirectory=/opt/wallex-agent/backend
 EnvironmentFile=/opt/wallex-agent/.env
 EnvironmentFile=/opt/wallex-agent/deploy/strategy.env
+# the challenge window (deploy/challenge.env, tracked in git) is loaded last so a push can move it
+EnvironmentFile=-/opt/wallex-agent/deploy/challenge.env
 Environment=PYTHONUNBUFFERED=1 TZ=UTC
 # its own journal (data/engine/strategy), so it never shares state with the main engine in either mode
 ExecStart=/root/.local/bin/uv run --no-dev python -m wallex_agent.engine run --mode shadow --name strategy

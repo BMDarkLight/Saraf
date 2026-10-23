@@ -6,6 +6,8 @@ Wants=network-online.target
 [Service]
 WorkingDirectory=/opt/wallex-agent/backend
 EnvironmentFile=/opt/wallex-agent/.env
+# the challenge window (deploy/challenge.env, tracked in git) is loaded last so a push can move it
+EnvironmentFile=-/opt/wallex-agent/deploy/challenge.env
 Environment=PYTHONUNBUFFERED=1 TZ=UTC
 ExecStart=/root/.local/bin/uv run --no-dev python -m wallex_agent.server
 Restart=always

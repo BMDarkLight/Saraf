@@ -314,12 +314,12 @@ class CoreDecider(ScriptedDecider):
         return Decision({"action": self.core, "reasoning": "scripted core"}, "rules")
 
 
-def usdt_engine(tmp_path, usdt_tmn, decider, **over):
-    m1 = {"AAAUSDT": synth(start=1.0), "BBBUSDT": synth(seed=11, start=2.0), "USDTTMN": usdt_tmn}
+def usdt_engine(tmp_path, usdt_tmn, decider, aaa=None, **over):
+    m1 = {"AAAUSDT": aaa or synth(start=1.0), "BBBUSDT": synth(seed=11, start=2.0), "USDTTMN": usdt_tmn}
     feed = SimFeed(m1, {k: hourly(v) for k, v in m1.items()}, 15, {k: 0.002 for k in m1})
-    s = make_settings(tmp_path, engine_quote="USDT", engine_universe="AAAUSDT,BBBUSDT", engine_min_score=0.0,
-                      engine_min_atr_pct=0.05, engine_fee_rate=0.0013, engine_maker_fee_rate=0.001,
-                      engine_max_exposure_pct=0.3, engine_max_position_pct=0.125, **over)
+    s = make_settings(tmp_path, **{"engine_quote": "USDT", "engine_universe": "AAAUSDT,BBBUSDT", "engine_min_score": 0.0,
+                                   "engine_min_atr_pct": 0.05, "engine_fee_rate": 0.0013, "engine_maker_fee_rate": 0.001,
+                                   "engine_max_exposure_pct": 0.3, "engine_max_position_pct": 0.125, **over})
     broker = SimExec(feed, s.engine_capital_tmn, s.engine_fee_rate, maker_fee_rate=s.maker_fee, quote="USDT",
                      tmn_fee_rate=0.003)
     return Engine(s, feed, broker, decider, Journal(tmp_path / "run")), broker, feed
@@ -349,7 +349,7 @@ async def test_usdt_core_rides_the_rate_and_ends_in_toman(tmp_path):
     assert len(core) == 3 and sum(float(t["pnl_tmn"]) for t in core) > 0       # the rate rose ~2.4% over the window
     assert broker.cash_by["TMN"] > 5_000_000                                     # realized in TMN, above capital
     sat = [t for t in trades if t["setup"] != "usdt_core"]
-    assert all(float(t["cost_tmn"]) <= 0.125 * 5_200_000 for t in sat)          # satellite sized in TMN, capped
+    assert all(float(t["cost_tmn"]) <= 0.25 * 5_200_000 for t in sat)           # satellite sized in TMN, capped
 
 
 async def test_core_guard_moves_to_toman_and_blocks_entries(tmp_path):
@@ -375,3 +375,69 @@ async def test_core_exit_slices_follow_ai_then_the_schedule(tmp_path):
     await run(engine, feed, end_ts - 7 * 3600, end_ts - 4 * 3600)
     assert engine.state["core"]["slices_done"] == 1                              # forced by the first deadline
     assert engine.core.slice_deadline(1) == pytest.approx(end_ts - 45 * 60 - 2 * (5.25 * 3600) / 3)
+
+
+# ------------------------------------------------- audit fixes (2026-10-23): the satellite could never trade
+def test_size_takes_the_exchange_minimum_when_the_risk_budget_allows_it(tmp_path):
+    """5M TMN is ~26 USDT; 1.2 x the 5 USDT minimum (~1.14M TMN) is above a 12.5% cap, so every entry was blocked."""
+    from wallex_agent.engine.risk import RiskManager
+    s = make_settings(tmp_path, engine_max_position_pct=0.125, engine_max_exposure_pct=0.5, engine_fee_rate=0.0013)
+    rm = RiskManager(s, min_notional=5 * 190_000)
+    kw = dict(equity=5_000_000, cash=5_000_000, exposure=0, price=100, size_fraction=1.0, regime="neutral")
+    sz = rm.size(stop=98, **kw)                                      # 2% stop: 1.14M loses ~25k, within 1% (50k)
+    assert sz.quote_amount == pytest.approx(1_140_000) and "exchange minimum" in sz.reason
+    assert rm.size(stop=90, **kw).quote_amount == 0                  # 10% stop: the minimum would risk ~2.3%
+    assert rm.size(stop=98, **{**kw, "exposure": 1_000_000}).quote_amount == 0   # no exposure room left
+    assert rm.size(stop=98, **{**kw, "cash": 1_000_000}).quote_amount == 0       # not enough cash
+    big = RiskManager(s, min_notional=50_000).size(stop=98, **kw)   # TMN markets: the normal, capped size
+    assert big.quote_amount == pytest.approx(625_000)
+
+
+async def test_usdt_satellite_actually_trades_with_the_strategy_profile(tmp_path):
+    async def events_with(d, **profile):
+        engine, broker, feed = usdt_engine(d, line(190_000, 191_000), CoreDecider(core="WAIT"),
+                                           aaa=synth(start=1.0, crash_at=3 * 1440 + 300), **profile)
+        await run(engine, feed, T0 + 3 * 86_400, T0 + 4 * 86_400 - 60)   # the dip comes on day 3
+        return [json.loads(l) for l in (d / "run" / "decisions.jsonl").read_text().splitlines()]
+    old = await events_with(tmp_path / "old")                    # 30% exposure x 0.67, 12.5% cap: never an order
+    assert not any(e["event"] in ("entry", "entry_order") for e in old)
+    assert any(e["event"] == "risk_block" and "below the minimum" in e["reason"] for e in old)
+    new = await events_with(tmp_path / "new", engine_max_exposure_pct=0.5, engine_max_position_pct=0.25,
+                            engine_max_positions=2)
+    entries = [e for e in new if e["event"] == "entry"]
+    assert entries and all(e["cost_tmn"] * 191_000 <= 0.5 * 5_100_000 for e in entries)   # cost_tmn is in USDT here
+
+
+async def test_ai_falls_back_to_the_rule_baseline_when_the_model_fails(tmp_path):
+    from types import SimpleNamespace as NS
+
+    async def boom(**kw):
+        raise TimeoutError("provider down")
+    ai = AIDecider(NS(chat=NS(completions=NS(create=boom))), "m", ResponseCache(tmp_path / "c.jsonl"), 0.001,
+                   rules=RuleDecider(0.5))
+    d = await ai.decide_entry(strategy.Candidate("AAAUSDT", "oversold_reversion", 0.7, 100, 1, 2.5, 3.5, []), {})
+    assert d.source == "rules_fallback" and d.payload["action"] == "TAKE" and "TimeoutError" in d.error
+    weak = await ai.decide_entry(strategy.Candidate("AAAUSDT", "oversold_reversion", 0.3, 100, 1, 2.5, 3.5, []), {})
+    assert weak.payload["action"] == "SKIP"
+
+
+async def test_breadth_is_measured_on_the_satellites_own_quote(tmp_path):
+    class Markets:
+        async def markets(self):
+            up, down = {"24h_ch": "2", "24h_quoteVolume": "5"}, {"24h_ch": "-2", "24h_quoteVolume": "5"}
+            # the toman weakened: every TMN market is up, while the coins themselves fell against USDT
+            return {"BTCTMN": {"quoteAsset": "TMN", "stats": up}, "ETHTMN": {"quoteAsset": "TMN", "stats": up},
+                    "BTCUSDT": {"quoteAsset": "USDT", "stats": down}, "ETHUSDT": {"quoteAsset": "USDT", "stats": down},
+                    "USDCUSDT": {"quoteAsset": "USDT", "stats": up}}
+
+    import wallex_agent.engine.feeds as feeds
+
+    async def no_fng(n):
+        raise RuntimeError("offline")
+    feeds.global_fear_greed, real = no_fng, feeds.global_fear_greed
+    try:
+        usdt = await LiveFeed(Markets(), make_settings(tmp_path, engine_quote="USDT")).market_context()
+        tmn = await LiveFeed(Markets(), make_settings(tmp_path, engine_quote="TMN")).market_context()
+    finally:
+        feeds.global_fear_greed = real
+    assert usdt["breadth_pct_up_24h"] == 0 and tmn["breadth_pct_up_24h"] == 100

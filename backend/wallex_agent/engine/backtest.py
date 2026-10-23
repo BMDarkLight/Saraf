@@ -36,7 +36,8 @@ def make_decider(s: Settings, kind: str, offline: bool = False):
                       api_key=s.engine_llm_api_key or s.llm_api_key or "missing")
     extra = json.loads(s.engine_llm_extra_body) if s.engine_llm_extra_body.strip() else None
     return AIDecider(llm, s.engine_llm_model or s.llm_model, ResponseCache(s.data_dir / "ai_cache.jsonl"),
-                     s.engine_fee_rate, offline=offline, extra_body=extra, quote=s.engine_quote)
+                     s.engine_fee_rate, offline=offline, extra_body=extra, quote=s.engine_quote,
+                     rules=RuleDecider(s.engine_min_score))
 
 
 def counterfactual(feed: SimFeed, run_dir: Path, fee: float, horizon_s: int) -> dict:

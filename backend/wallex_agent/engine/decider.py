@@ -187,8 +187,12 @@ class AIDecider:
     name = "ai"
 
     def __init__(self, llm: AsyncOpenAI, model: str, cache: ResponseCache, fee_rate: float,
-                 timeout: float = 45.0, offline: bool = False, extra_body: dict | None = None, quote: str = "TMN"):
+                 timeout: float = 45.0, offline: bool = False, extra_body: dict | None = None, quote: str = "TMN",
+                 rules: "RuleDecider | None" = None):
         self.llm, self.model, self.cache = llm, model, cache
+        # live: when the model can't answer (outage, spent budget, garbage), the rule baseline decides the entry
+        # instead of a blanket SKIP, which silently stopped all trading. The risk manager still bounds it.
+        self.rules = rules
         self.quote = quote
         self.extra_body = extra_body or {}   # provider switches, e.g. {"reasoning_effort": "none"} for Qwen
         self.fee_rate, self.timeout = fee_rate, timeout
@@ -228,6 +232,10 @@ class AIDecider:
                 f"CONTEXT\n{json.dumps(ctx, ensure_ascii=False, default=str)}\n\n"
                 f"Decide. Schema: {ENTRY_SCHEMA}")
         d = await self._ask(user, EntryDecision)
+        if not d.payload and self.rules:   # offline replay too: failed calls were never cached, so it matches
+            r = await self.rules.decide_entry(cand, ctx)
+            r.payload["reasoning"] = f"AI unavailable, rule baseline decided: {r.payload['reasoning']}"
+            return Decision(r.payload, "rules_fallback", d.prompt_hash, d.error)
         if not d.payload:
             d.payload = {"action": "SKIP", "confidence": 0, "size_fraction": 0, "stop_atr": cand.stop_atr,
                          "target_atr": cand.target_atr, "reasoning": f"fail-safe skip ({d.error})"}

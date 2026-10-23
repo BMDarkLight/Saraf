@@ -101,7 +101,11 @@ class LiveFeed:
     async def market_context(self) -> dict:
         if self._ctx and self._ctx[0] > time.monotonic():
             return self._ctx[1]
-        rows = [m for s, m in (await self.client.markets()).items() if m["quoteAsset"] == "TMN" and s not in DEFAULT_EXCLUDE]
+        # breadth of the markets the satellite trades: on TMN markets every coin moves with USDT/TMN, so a weak
+        # toman read as broad strength (and a strong one as a sell-off) for a USDT satellite. SimFeed measures
+        # breadth on the traded universe too, so backtest and live now apply the same gate.
+        rows = [m for s, m in (await self.client.markets()).items()
+                if m["quoteAsset"] == self.s.engine_quote and split_symbol(s)[0] not in EXCLUDED_BASES]
         changes = [(safe_float(m["stats"].get("24h_ch")), safe_float(m["stats"].get("24h_quoteVolume"))) for m in rows]
         changes = [c for c in changes if c[1] > 0]
         vol = sum(v for _, v in changes) or 1

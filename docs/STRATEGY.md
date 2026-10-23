@@ -103,9 +103,20 @@ uv run python -m wallex_agent.engine backtest --days 7 --end 2026-10-22T21:00:00
   --symbols BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT,DOGEUSDT,BNBUSDT,TRXUSDT,ADAUSDT,AVAXUSDT,LINKUSDT,USDTTMN
 ```
 
-## 6. Remaining steps
+## 6. Audit (2026-10-23): why it barely traded
 
-1. `ENGINE_END_TIME` is set in the server .env (2026-10-24 23:59 Tehran); change it there if the organisers differ.
+| Finding | Effect | Fix |
+|---|---|---|
+| 5M TMN is ~26 USDT; Wallex's USDT-market minimum is 5 USDT, and the engine needs 1.2x that (~1.14M TMN, 23% of equity). The profile capped a position at 12.5% and exposure at 30% x 0.67 (neutral) = 20% | **The satellite could never place an order**: every signal that passed the gate ended in "size below the minimum order". The 7-day backtest's "0 satellite trades" was this as much as the gate | `risk.size` takes the exchange minimum when its loss at the stop fits the per-trade risk budget, the exposure room and the cash; profile: exposure 50%, position 25%, 2 positions |
+| Live breadth gate counted **TMN** markets, while the satellite trades USDT markets and the backtest measured breadth on the USDT universe | A strengthening toman read as a broad sell-off (risk_off: no entries) and a weakening one as strength; backtest and live applied different gates | breadth is measured on the markets of `ENGINE_QUOTE` |
+| An LLM failure (timeout, spent budget, bad JSON) made every entry a fail-safe SKIP | A provider outage silently stopped all trading | entries fall back to the rule baseline (which beat the AI in every backtest above); regime and reviews keep their safe defaults |
+| `deploy/strategy.env` reached the live engine only through a copy made when the switch was pressed | Strategy changes pushed later never reached the live engine | `deploy.sh` refreshes `data/engine/profile.env` when the strategy is live |
+| `ENGINE_END_TIME` lived only in the server's `.env` | Moving the challenge window needed shell access | `deploy/challenge.env` (tracked, loaded last by all three services) |
+
+## 7. Remaining steps
+
+1. The challenge ends **Monday 2026-10-26 23:59 Tehran** (`deploy/challenge.env`, `2026-10-26T20:29:00Z`), extended
+   by two days. No new entries after T-4h, the AI-timed USDT exit opens at T-6h, everything is in TMN by T-45min.
 2. Review the shadow session, then press «اجرای واقعی» on the strategy card: the main engine goes live with
    `deploy/strategy.env` (copied to `data/engine/profile.env`, loaded by `wallex-engine.service`).
 3. Convert TMN↔USDT with maker limits (0.25% instead of 0.30%) to recover about 0.1%.

@@ -55,7 +55,13 @@ class RiskManager:
         amount = min(by_risk, cap, room, cash * 0.98) * frac
         parts = (f"risk {by_risk:,.0f} | cap {cap:,.0f} | exposure room {room:,.0f} | cash {cash:,.0f} "
                  f"x AI fraction {frac:.2f}")
-        if amount < self.min_notional * 1.2:
+        floor = self.min_notional * 1.2
+        if amount < floor and frac > 0 and floor <= min(by_risk, room, cash * 0.98):
+            # A small account on USDT markets: 5 USDT x 1.2 is ~23% of 5M TMN, above the per-position cap, so
+            # nothing could ever be bought. The exchange minimum is the smallest trade there is; take it when its
+            # loss at the stop stays within the per-trade risk budget and it fits the exposure room and the cash.
+            return SizeResult(floor, f"exchange minimum order {floor:,.0f} (within the risk budget; {parts})")
+        if amount < floor:
             return SizeResult(0, f"size {amount:,.0f} TMN below the minimum order ({parts})")
         return SizeResult(amount, parts)
 

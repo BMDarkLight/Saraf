@@ -26,6 +26,11 @@ else
   echo "GIT_COMMIT=$COMMIT" >> "$APP/.env"
 fi
 grep -q '^ENGINE_RUN_ARGS=' "$APP/.env" || echo "ENGINE_RUN_ARGS=--mode shadow" >> "$APP/.env"
+# The strategy runs for real from a copy of deploy/strategy.env (data/engine/profile.env, made by the strategy card's
+# switch); refresh that copy so changes to the strategy's settings reach the live engine on deploy, not only on a toggle.
+if [ -f "$APP/data/engine/profile.env" ]; then
+  cp "$APP/deploy/strategy.env" "$APP/data/engine/profile.env"
+fi
 
 install -m 644 "$APP"/deploy/wallex-engine.service "$APP"/deploy/wallex-web.service \
   "$APP"/deploy/wallex-strategy.service /etc/systemd/system/
