@@ -115,6 +115,8 @@ class Settings(BaseSettings):
     # At the challenge end also sell coins the engine doesn't manage (bought by hand or through the chat assistant):
     # the challenge counts realized TMN, so nothing may be left in coins
     engine_final_sweep: bool = True
+    engine_follow_address: str = ""   # a Hyperliquid account the engine copies (copy-trading a real trader); "" = off
+    engine_follow_pct: float = 0.5    # at most this share of equity follows that trader's long positions
 
     # News / web
     tavily_api_key: str = ""

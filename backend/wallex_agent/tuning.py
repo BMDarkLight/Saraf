@@ -8,6 +8,7 @@ tunable here. Personas (personas.py) are named sets of these same parameters.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -66,6 +67,10 @@ PARAMS: list[dict[str, Any]] = [
     {"key": "engine_core_exit_slices", "type": "int", "min": 1, "max": 6, "step": 1, "group": "time",
      "label": "تعداد بخش‌های فروش تتر"},
     {"key": "engine_final_sweep", "type": "bool", "group": "core", "label": "فروش همه رمزارزها در پایان چالش"},
+    # copy-trading a real trader: the address is set by the copy button (group "follow" has no settings card)
+    {"key": "engine_follow_address", "type": "address", "group": "follow", "label": "تریدر کپی‌شده"},
+    {"key": "engine_follow_pct", "type": "pct", "min": 0.1, "max": 1.0, "step": 0.05, "group": "risk",
+     "label": "سهم سرمایه در کپی تریدر", "help": "وقتی یک تریدر واقعی کپی می‌شود، حداکثر این سهم از حساب پوزیشن‌های لانگ او را دنبال می‌کند"},
 ]
 PARAMS += [
     # --- timings (the challenge window and the schedule around it); the bar-based ones are 15-minute bars
@@ -121,6 +126,10 @@ def validate(values: dict[str, Any], new: bool = True) -> dict[str, Any]:
         try:
             if t == "datetime":
                 v = _utc_iso(raw, future=new)
+            elif t == "address":
+                v = str(raw).strip().lower()
+                if v and not re.match(r"^0x[0-9a-f]{40}$", v):
+                    raise TuningError(f"{key}: not a 0x... address")
             elif t == "bool":
                 v: Any = raw if isinstance(raw, bool) else str(raw).strip().lower() in ("1", "true", "yes", "on")
             elif t == "int":

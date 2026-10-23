@@ -10,7 +10,7 @@ export const REGIME_FA: Record<string, string> = { risk_on: "ریسک‌پذیر
 const EVENT_FA: Record<string, string> = {
   entry: "ورود", exit: "خروج", entry_order: "سفارش ورود", entry_cancelled: "لغو سفارش", decision: "تصمیم AI",
   risk_block: "رد توسط ریسک", regime: "وضعیت بازار", core: "هسته تتری", core_decision: "زمان‌بندی خروج", sweep: "فروش پایانی",
-  circuit_breaker: "ترمز اضطراری", error: "خطا", start: "شروع", stop: "توقف", review: "بازبینی",
+  circuit_breaker: "ترمز اضطراری", error: "خطا", start: "شروع", stop: "توقف", review: "بازبینی", trader: "تریدر کپی‌شده",
 };
 
 const base = (sym?: string) => String(sym ?? "").replace(/(USDT|TMN)$/, "");

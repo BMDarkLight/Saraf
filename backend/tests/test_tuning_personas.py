@@ -284,3 +284,27 @@ def test_live_traders_are_listed_added_and_removed(srv, monkeypatch):
     assert len(r) == 1 and r[0]["name"] == "Famous" and r[0]["source"] == "pinned" and r[0]["return_pct"] == 1.0
     assert r[0]["positions"][0]["coin"] == "BTC" and r[0]["account_usd"] == 2e6
     assert c.delete(f"/api/traders/{addr}").json()["ok"] and c.get("/api/traders").json()["traders"] == []
+
+
+def test_copying_a_live_trader_points_the_engine_at_them_and_stop_copy_clears_it(srv, monkeypatch):
+    from wallex_agent import traders
+    monkeypatch.setattr(srv.server.traders_mod, "DIR", srv.eng / "traders")
+    monkeypatch.setattr(srv.server, "STRATEGY_ENV", srv.tmp / "strategy.env")
+    (srv.tmp / "strategy.env").write_text("ENGINE_QUOTE=USDT\n")
+    c = srv.c
+    addr = "0x" + "ef" * 20
+    assert c.post(f"/api/traders/{addr}/copy", json={}).status_code == 404               # follow it first
+    c.post("/api/traders", json={"address": addr, "name": "Whale"})
+    c.post("/api/strategy/tuning", json={"values": {"engine_end_time": "2099-01-01T00:00:00Z", "engine_max_positions": 1}})
+    (srv.eng / "mode.env").write_text("ENGINE_RUN_ARGS=--mode live --confirm-live\n")
+    assert c.post(f"/api/traders/{addr}/copy", json={"pct": 0.4}).status_code == 400     # real money: confirm
+    r = c.post(f"/api/traders/{addr}/copy", json={"pct": 0.4, "confirm": "LIVE"}).json()
+    assert r["copying"]["kind"] == "trader" and r["copying"]["name"] == "Whale"
+    over = tuning.read_env(srv.eng / "tuning.env")
+    assert over == {"engine_end_time": "2099-01-01T00:00:00Z", "engine_follow_address": addr, "engine_follow_pct": 0.4}
+    assert srv.calls[-1] == ("systemctl", "restart", "wallex-engine")
+    assert c.post(f"/api/traders/{addr}/copy", json={"pct": 3, "confirm": "LIVE"}).status_code == 400
+    assert c.post("/api/personas/stop-copy", json={"confirm": "LIVE"}).json()["ok"]
+    assert tuning.read_env(srv.eng / "tuning.env") == {"engine_end_time": "2099-01-01T00:00:00Z"}
+    assert c.get("/api/personas").json()["copying"] is None
+    assert traders.run_name(addr) == "trader-efefefef"

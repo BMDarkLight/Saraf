@@ -606,3 +606,69 @@ async def test_final_sweep_tries_the_other_market_when_one_refuses(tmp_path):
     feed.t = T0 + 86_400
     assert await engine.sweep_unmanaged(feed.t) is True
     assert broker.holdings["OIL"] < 1e-9 and broker.cash_by["USDT"] > 0.09 * 150
+
+
+class FakeHL:
+    def __init__(self):
+        self.book = []
+
+    async def positions(self, address):
+        return {"account_usd": 1_000_000.0,
+                "positions": [{"coin": c, "side": s, "size": u / 10, "usd": u, "entry": 1.0, "upnl": 0.0, "leverage": 5}
+                              for c, s, u in self.book]}
+
+
+async def test_live_copy_follows_a_traders_longs_with_part_of_the_account(tmp_path):
+    """Copy-trading a real trader in the engine: longs on Wallex USDT markets are bought from the core's USDT with at
+    most ENGINE_FOLLOW_PCT of equity, shorts are not copied, a close is sold, the satellite stays off, and stopping
+    the copy sells what it bought."""
+    addr = "0x" + "ab" * 20
+    engine, broker, feed = usdt_engine(tmp_path, line(273_000, 274_000), CoreDecider(action="BUY"),
+                                       engine_follow_address=addr, engine_follow_pct=0.5)
+    hl = engine.follow.hl = FakeHL()
+    hl.book = [("AAA", "long", 400_000), ("BBB", "short", 300_000), ("ZZZ", "long", 100_000)]
+    feed.t = T0 + 86_400
+    await engine.monitor()
+    eq, _, _ = await engine.equity()
+    rate = await engine.rate()
+    held = engine.state["follow"]["holdings"]
+    assert set(held) == {"AAAUSDT"} and "BBB" not in broker.holdings                 # the short and ZZZ are skipped
+    value = held["AAAUSDT"] * (await feed.quote("AAAUSDT"))["bid"] * rate
+    assert value == pytest.approx(0.4 * 0.5 * eq, rel=0.02)                          # 40% of the 50% copy budget
+    await engine.on_bar()
+    assert not engine.positions and not engine.pending                               # the satellite is off while copying
+    hl.book = [("BBB", "short", 300_000)]                                            # the trader closes AAA
+    feed.t += 120
+    await engine.monitor()
+    assert engine.state["follow"]["holdings"] == {} and broker.holdings.get("AAA", 0) < 1e-9
+    rows = list(csv.DictReader((tmp_path / "run" / "trades.csv").open()))
+    assert rows[-1]["setup"] == "copy"
+    events = [json.loads(l) for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines()]
+    assert any(e["event"] == "trader" and e["action"] == "closed" for e in events)
+
+    hl.book = [("AAA", "long", 400_000)]
+    feed.t += 120
+    await engine.monitor()
+    assert engine.state["follow"]["holdings"]
+    engine.follow.address = ""                                                       # the copy is stopped
+    feed.t += 120
+    await engine.monitor()
+    assert engine.state["follow"]["holdings"] == {} and broker.holdings.get("AAA", 0) < 1e-9
+
+
+async def test_live_copy_buys_nothing_while_switched_off(tmp_path):
+    control = tmp_path / "control.json"
+    control.write_text('{"paused": true}')
+    engine, broker, feed = usdt_engine(tmp_path, line(273_000, 274_000), CoreDecider(action="BUY"),
+                                       engine_follow_address="0x" + "cd" * 20)
+    engine.control_path = control
+    engine.follow.hl = FakeHL()
+    engine.follow.hl.book = [("AAA", "long", 500_000)]
+    broker.cash_by["USDT"] = 18.0                                # USDT is there: only the switch holds the buy back
+    feed.t = T0 + 86_400
+    await engine.monitor()
+    assert not engine.state["follow"]["holdings"] and broker.holdings.get("AAA", 0) == 0
+    control.write_text('{"paused": false}')
+    feed.t += 120
+    await engine.monitor()
+    assert engine.state["follow"]["holdings"]

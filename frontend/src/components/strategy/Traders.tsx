@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { compact, pct, tone } from "../../format";
-import { hhmm, pctOrDash, postJSON, Sparkline, Stat } from "./common";
+import { ConfirmDialog, hhmm, pctOrDash, postJSON, Sparkline, Stat } from "./common";
 
 const usd = (v?: number | null) => (v == null ? "—" : `$${compact(Math.abs(v))}`);
 const signedUsd = (v?: number | null) => (v == null ? "—" : `${v < 0 ? "−" : "+"}$${compact(Math.abs(v))}`);
@@ -48,7 +48,7 @@ function Bias({ positions }: { positions?: any[] }) {
   );
 }
 
-export function TraderCards({ traders, onOpen, onChanged }: { traders: any[]; onOpen: (id: string) => void; onChanged: () => void }) {
+export function TraderCards({ traders, copying, onOpen, onChanged }: { traders: any[]; copying?: any; onOpen: (id: string) => void; onChanged: () => void }) {
   const [adding, setAdding] = useState(false);
   return (
     <section className="traders">
@@ -64,7 +64,8 @@ export function TraderCards({ traders, onOpen, onChanged }: { traders: any[]; on
       {!traders.length && <div className="muted small">فهرست تریدرها پس از اولین اجرای سرویس روی سرور ساخته می‌شود.</div>}
       <div className="p-grid">
         {traders.map((t) => (
-          <button className="p-card trader" key={t.id} onClick={() => onOpen(t.id)} style={{ "--hue": t.hue } as React.CSSProperties}>
+          <button className={`p-card trader ${copying?.address === t.address ? "copying" : ""}`} key={t.id} onClick={() => onOpen(t.id)}
+                  style={{ "--hue": t.hue } as React.CSSProperties}>
             <div className="p-head">
               <TraderAvatar t={t} />
               <div className="p-id">
@@ -87,7 +88,8 @@ export function TraderCards({ traders, onOpen, onChanged }: { traders: any[]; on
               <span className="muted small">کپی شبیه‌سازی‌شده</span>
               <b className={`num ${tone(t.return_pct)}`}>{pctOrDash(t.return_pct)}</b>
               <span className="spacer" />
-              {!t.active && <span className="pill">در انتظار اجرا</span>}
+              {copying?.address === t.address ? <span className="pill up">کپی زنده</span>
+                : !t.active && <span className="pill">در انتظار اجرا</span>}
             </div>
           </button>
         ))}
@@ -120,8 +122,22 @@ function AddTrader({ onDone }: { onDone: () => void }) {
   );
 }
 
-export function TraderProfile({ t, onBack, onChanged }: { t: any; onBack: () => void; onChanged: () => void }) {
+export function TraderProfile({ t, d, onBack, onChanged }: { t: any; d: any; onBack: () => void; onChanged: () => void }) {
   const b = t.board ?? {};
+  const [ask, setAsk] = useState<null | "copy" | "stop">(null);
+  const [share, setShare] = useState(50);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const copyingThis = d.copying?.address === t.address;
+  const go = async () => {
+    setBusy(true); setErr("");
+    try {
+      if (ask === "copy") await postJSON(`/api/traders/${t.address}/copy`, { pct: share / 100, confirm: d.live ? "LIVE" : "" });
+      else await postJSON("/api/personas/stop-copy", { confirm: d.live ? "LIVE" : "" });
+      setAsk(null);
+      onChanged();
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
   const remove = async () => {
     await fetch(`/api/traders/${t.address}`, { method: "DELETE" });
     onChanged(); onBack();
@@ -140,7 +156,10 @@ export function TraderProfile({ t, onBack, onChanged }: { t: any; onBack: () => 
             <div className="tags"><span>Hyperliquid</span><span>{t.source === "pinned" ? "افزوده شما" : "جدول رده‌بندی"}</span></div>
           </div>
           <span className="spacer" />
-          {t.source === "pinned" && <button className="btn ghost" onClick={remove}>حذف از فهرست</button>}
+          {t.source === "pinned" && !copyingThis && <button className="btn ghost" onClick={remove}>حذف از فهرست</button>}
+          {copyingThis
+            ? <button className="btn ghost" onClick={() => setAsk("stop")}>توقف کپی</button>
+            : <button className={`btn ${d.live ? "danger" : "primary"}`} onClick={() => setAsk("copy")}>کپی زنده</button>}
         </div>
       </header>
       <div className="stats-row slim">
@@ -172,7 +191,9 @@ export function TraderProfile({ t, onBack, onChanged }: { t: any; onBack: () => 
           )}
         </section>
         <section className="panel">
-          <h4>کپی در والکس <span className="muted small">(شبیه‌سازی، سرمایه ۵ میلیون تومان)</span></h4>
+          <h4>کپی در والکس <span className="muted small">(کارنامه شبیه‌سازی، سرمایه ۵ میلیون تومان)</span></h4>
+          {copyingThis && <div className="note">موتور اصلی این تریدر را کپی می‌کند: تا {Math.round(100 * (d.copying.pct ?? 0.5))}٪ حساب
+            {d.live ? " با پول واقعی" : " (حالت شبیه‌سازی برنامه)"}. کارهایش در «نمای کلی» دیده می‌شود.</div>}
           <div className="t-line"><span className="muted">بازده کپی</span> <b className={`num ${tone(t.return_pct)}`}>{pctOrDash(t.return_pct)}</b>
             <span className="muted small"> · {t.trades} معامله بسته</span></div>
           <Sparkline points={t.curve ?? []} base={5_000_000} height={90} />
@@ -214,7 +235,28 @@ export function TraderProfile({ t, onBack, onChanged }: { t: any; onBack: () => 
         </section>
       </div>
       <p className="muted small">داده‌ها از API عمومی Hyperliquid خوانده می‌شود؛ نام فقط وقتی نشان داده می‌شود که خود تریدر روی Hyperliquid
-        ثبت کرده یا شما هنگام افزودن وارد کرده‌اید. کپی با پول واقعی هنوز فعال نیست؛ این کارنامه شبیه‌سازی با قیمت‌ها و کارمزد واقعی والکس است.</p>
+        ثبت کرده یا شما هنگام افزودن وارد کرده‌اید. کارنامه بالا شبیه‌سازی با قیمت‌ها و کارمزد واقعی والکس است؛ «کپی زنده» همین کار را
+        روی حساب اصلی انجام می‌دهد.</p>
+      {ask && (
+        <ConfirmDialog title={ask === "copy" ? `کپی زنده «${label(t)}»` : "توقف کپی"} danger={d.live} busy={busy} error={err}
+          okLabel={ask === "copy" ? (d.live ? "بله، با پول واقعی کپی شود" : "کپی") : "توقف کپی"} onOk={go}
+          onCancel={() => { setAsk(null); setErr(""); }}>
+          {ask === "copy" ? (
+            <>
+              <p>موتور اصلی هر دقیقه پوزیشن‌های این تریدر را می‌خواند و پوزیشن‌های لانگ او را در بازارهای تتری والکس با تتر هسته
+                کپی می‌کند (بدون اهرم). شورت‌ها کپی نمی‌شوند و آن سهم در تتر می‌ماند. ماهواره خرید افت تا پایان کپی خاموش است.
+                سوئیچ روشن/خاموش، ترمزهای افت و فروش پایانی چالش مثل قبل کار می‌کنند.</p>
+              <label className="share">حداکثر سهم حساب در کپی: <b className="num">{share}٪</b>
+                <input type="range" min={10} max={100} step={5} value={share} onChange={(e) => setShare(+e.target.value)} />
+              </label>
+              {copying(d) && <p className="muted small">کپی فعلی «{d.copying.name}» جایگزین می‌شود.</p>}
+              {d.live && <p className="live-note">برنامه در حالت معاملات واقعی است: کپی با پول واقعی انجام می‌شود.</p>}
+            </>
+          ) : <p>موتور دیگر این تریدر را دنبال نمی‌کند، رمزارزهای کپی به تتر هسته فروخته می‌شوند و موتور به پروفایل استراتژی برمی‌گردد.</p>}
+        </ConfirmDialog>
+      )}
     </div>
   );
 }
+
+const copying = (d: any) => !!d.copying;

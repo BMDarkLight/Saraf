@@ -931,3 +931,5 @@ table.diff td { padding: 6px; border-top: 1px solid var(--border-soft); unicode-
 .add-trader input { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px;
                     color: inherit; font: inherit; }
 .add-trader .btn { justify-self: start; }
+.modal .share { display: grid; gap: 6px; margin: 10px 0; }
+.modal .share input { width: 100%; }

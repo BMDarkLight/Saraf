@@ -269,7 +269,7 @@ async def portfolio():
 
 
 ENGINE_EVENTS = {"sweep", "core", "core_decision", "regime", "decision", "risk_block", "entry_order", "entry", "entry_cancelled", "exit", "review",
-                 "circuit_breaker", "error", "start", "stop"}
+                 "circuit_breaker", "error", "start", "stop", "trader"}
 
 
 STRATEGY_RUN = "strategy"   # deploy/wallex-strategy.service: the USDT strategy in shadow beside the main engine
@@ -330,6 +330,7 @@ def engine_status(mode: str | None = None) -> dict | None:
             "halted": state.get("halted"), "pause_until": state.get("pause_until"),
             "positions": list(state.get("positions", {}).values()), "pending": pending,
             "trades": recent, "stats": stats, "events": events, "core": state.get("core"),
+            "follow": state.get("follow"),
             "exposure_tmn": float(last[3]) if last else None}
 
 
@@ -593,6 +594,13 @@ async def strategy():
             for p in eng["positions"]:
                 last = float(markets[p["symbol"]]["stats"]["lastPrice"])
                 managed += last * p["qty"] * (usdt_tmn if p.get("quote") == "USDT" else 1.0)
+    follow = (eng.get("follow") or {}).get("holdings") or {}
+    if follow:   # a copied trader's coins are the engine's, not "outside the engine"
+        with contextlib.suppress(WallexError, KeyError, ValueError, TypeError):
+            markets = await ctx.client.markets()
+            usdt_tmn = float(markets["USDTTMN"]["stats"]["lastPrice"])
+            for sym, qty in follow.items():
+                managed += float(markets[sym]["stats"]["lastPrice"]) * qty * usdt_tmn
     pending = sum(float(o.get("amount_tmn") or 0) for o in eng["pending"])
     exposure = eng.get("exposure_tmn") or 0.0
     return {
@@ -805,6 +813,36 @@ async def add_trader(body: TraderIn):
     pinned.insert(0, {"address": addr, "name": body.name.strip()[:40] or None, "added": time.time()})
     traders_mod.save_json(traders_mod.DIR / "pinned.json", pinned)
     return {"ok": True}
+
+
+class TraderCopyIn(BaseModel):
+    confirm: str = ""
+    pct: float = 0.5
+
+
+@app.post("/api/traders/{address}/copy")
+async def copy_trader(address: str, body: TraderCopyIn):
+    """Copy a real trader with the main engine: it follows their long positions with up to `pct` of equity (real money
+    in live mode, so live needs confirm=LIVE). Restarts the engine; the challenge window settings are kept."""
+    addr = address.lower()
+    t = next((x for x in traders_mod.followed(traders_mod.DIR) if x["address"] == addr), None)
+    if not t:
+        raise HTTPException(404, "that trader is not followed; add it first")
+    try:
+        values = {**tuning.keep_on_copy(tuning.read_env(TUNING_FILE)),
+                  **tuning.validate({"engine_follow_address": addr, "engine_follow_pct": body.pct})}
+    except tuning.TuningError as e:
+        raise HTTPException(400, str(e))
+    _check_live_confirm(body.confirm)
+    _need_systemd()
+    STRATEGY_PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STRATEGY_PROFILE_FILE.write_text(STRATEGY_ENV.read_text())   # the copy trades USDT markets with the USDT core
+    _write_tuning(values)
+    name = t.get("name") or f"نهنگ {addr[-4:].upper()}"
+    COPY_FILE.write_text(json.dumps({"id": traders_mod.run_name(addr), "kind": "trader", "address": addr, "name": name,
+                                     "pct": body.pct, "at": time.time(), "modified": False}, ensure_ascii=False))
+    await _restart_engine()
+    return {"ok": True, "copying": copying()}
 
 
 @app.delete("/api/traders/{address}")

@@ -48,11 +48,11 @@ export function Personas({ onApplied, params }: { onApplied: () => void; params:
   const sel = d.personas.find((p: any) => p.id === open);
   if (sel) return <Profile p={sel} d={d} params={params} onBack={() => setOpen(null)} onApplied={() => { load(); onApplied(); }} />;
   const trader = (d.traders ?? []).find((t: any) => t.id === open);
-  if (trader) return <TraderProfile t={trader} onBack={() => setOpen(null)} onChanged={load} />;
+  if (trader) return <TraderProfile t={trader} d={d} onBack={() => setOpen(null)} onChanged={() => { load(); onApplied(); }} />;
 
   return (
     <div className="personas">
-      <TraderCards traders={d.traders ?? []} onOpen={setOpen} onChanged={load} />
+      <TraderCards traders={d.traders ?? []} copying={d.copying} onOpen={setOpen} onChanged={load} />
       <div className="sec-h"><h4>پرسوناهای استراتژی</h4></div>
       <p className="muted">هر پرسونا یک نسخه از استراتژی با تنظیمات خودش است که روی سرور به‌صورت شبیه‌سازی (داده واقعی والکس، بدون
         سفارش واقعی) اجرا می‌شود؛ کارنامه‌ای که می‌بینید همان اجراست. با «کپی» موتور اصلی تنظیمات آن پرسونا را می‌گیرد.</p>

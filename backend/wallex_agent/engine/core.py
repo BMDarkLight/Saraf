@@ -20,6 +20,7 @@ from pathlib import Path
 from ..config import Settings
 from . import strategy
 from .allocator import CoreAllocator
+from .follow import FollowCopy
 from .features import compute
 from .journal import Journal
 from .markets import split_symbol
@@ -71,6 +72,8 @@ class Engine:
         # Books are kept in TMN (the challenge's unit); the satellite trades X/<quote> markets.
         self.quote = settings.engine_quote
         self.core = CoreAllocator(self) if self.quote == "USDT" and settings.engine_core_enabled else None
+        # copy-trading a real trader (follow.py); it also sells a stopped copy's coins, so it always exists on USDT
+        self.follow = FollowCopy(self) if self.quote == "USDT" else None
 
     # ---------------------------------------------------------------- utils
     def paused(self) -> bool:
@@ -264,7 +267,8 @@ class Engine:
             await self._review_positions(now)
 
         cands = []
-        for sym in (await self.feed.universe() if self.setups else []):   # no setups: the USDT core only
+        following = self.follow is not None and self.follow.active   # copying a trader replaces the satellite
+        for sym in (await self.feed.universe() if self.setups and not following else []):   # no setups: the core only
             try:
                 bars, htf = await self.feed.bars(sym)
             except Exception as e:
@@ -446,6 +450,8 @@ class Engine:
                                                             "flatten and halt", equity=eq)
             self.state["halted"] = True
             await self.flatten(now, "drawdown_halt")
+            if self.follow:
+                await self.follow.liquidate(now, "drawdown halt")
             return
         if dd >= self.s.engine_drawdown_pause_pct and now >= self.state["pause_until"]:
             self.state["pause_until"] = now + self.s.engine_pause_hours * 3600
@@ -461,6 +467,8 @@ class Engine:
             return
         if self.core:
             await self.core.tick(now)
+        if self.follow and not self.state["halted"]:
+            await self.follow.tick(now)
 
         fee = self.s.engine_fee_rate
         for pid, p in list(self.positions.items()):
