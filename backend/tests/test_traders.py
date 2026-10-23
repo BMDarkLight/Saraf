@@ -108,3 +108,19 @@ def test_followed_puts_the_owners_traders_first(tmp_path):
     traders.save_json(tmp_path / "selection.json", {"at": 1, "traders": [{"address": a}, {"address": b}]})
     out = traders.followed(tmp_path)
     assert [(t["address"], t["source"]) for t in out] == [(b, "pinned"), (a, "leaderboard")]
+
+
+async def test_pick_prefers_traders_a_spot_copy_can_follow():
+    """The leaderboard's top accounts were all short on 2026-10-23: their copies sat in USDT. The pick now reads each
+    candidate's book and keeps the profitable ones with real longs on Wallex markets."""
+    rows = [{"address": a, "account_usd": 5e6, "pnl_week": 1, "pnl_month": m, "pnl_allTime": 1}
+            for a, m in (("0xshort", 90), ("0xlong", 50), ("0xempty", 80), ("0xsmall_long", 70))]
+    books = {"0xshort": pos(("BTC", "short", 1, 4_000_000)), "0xlong": pos(("BTC", "long", 1, 2_000_000)),
+             "0xempty": pos(account=5_000), "0xsmall_long": pos(("ETH", "long", 1, 50_000))}
+
+    class HL:
+        async def positions(self, a):
+            return books[a]
+    picked = await traders.pick_copyable(HL(), rows, set(PRICES), n=2)
+    assert [p["address"] for p in picked] == ["0xlong", "0xshort"]          # copyable first, then the best of the rest
+    assert picked[0]["copyable_long"] == 1.0

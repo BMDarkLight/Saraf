@@ -43,7 +43,7 @@ MIN_ACCOUNT_USD = 2_000_000
 POLL_SECONDS = 60
 FILLS_SECONDS = 300
 MARK_SECONDS = 300
-RESELECT_SECONDS = 7 * 86_400
+RESELECT_SECONDS = 86_400
 
 
 def run_name(address: str) -> str:
@@ -148,6 +148,28 @@ def pick_leaders(rows: list[dict], n: int = LEADERS) -> list[dict]:
     good = [r for r in rows if r["pnl_week"] > 0 and r["pnl_month"] > 0 and r["pnl_allTime"] > 0
             and r["account_usd"] >= MIN_ACCOUNT_USD]
     return sorted(good, key=lambda r: -r["pnl_month"])[:n]
+
+
+async def pick_copyable(hl: "Hyperliquid", rows: list[dict], tradable: set[str], n: int = LEADERS,
+                        min_long: float = 0.10, pool: int = 40) -> list[dict]:
+    """Among the consistently profitable large accounts, the ones a Wallex spot copy can actually follow right now:
+    at least `min_long` of their account in longs on Wallex USDT markets (a book of shorts copies to plain USDT).
+    Ranked by 30-day profit; if fewer qualify, the most profitable of the rest fill the list."""
+    cands = pick_leaders(rows, n=pool)
+    good, rest = [], []
+    for r in cands:
+        try:
+            pos = await hl.positions(r["address"])
+        except Exception:
+            continue
+        if pos["account_usd"] < MIN_ACCOUNT_USD / 2:   # emptied since the leaderboard was computed
+            continue
+        w, _ = target_weights(pos, tradable)
+        (good if sum(w.values()) >= min_long else rest).append({**r, "account_usd": pos["account_usd"],
+                                                                "copyable_long": round(sum(w.values()), 3)})
+        if len(good) >= n:
+            break
+    return (good + rest)[:n]
 
 
 def load_json(path: Path, default: Any) -> Any:
@@ -350,26 +372,25 @@ async def run(s: Settings, directory: Path = DIR, max_loops: int | None = None) 
             loops += 1
             now = time.time()
             sel = load_json(directory / "selection.json", {})
-            # weekly, and every 10 minutes while the pick is empty (a failed or empty leaderboard read)
-            if now - sel.get("at", 0) > (RESELECT_SECONDS if sel.get("traders") else 600):
-                try:
-                    rows = await hl.leaderboard()
-                    picked = pick_leaders(rows)
-                    board = {r["address"]: r for r in rows}
-                    keep = [t for t in sel.get("traders", []) if t["address"] in {p["address"] for p in picked}]
-                    sel = {"at": now, "traders": keep + [p for p in picked if p["address"] not in {k["address"] for k in keep}]}
-                    save_json(directory / "selection.json", sel)
-                    print(f"[traders] picked {[p['address'] for p in picked]}", flush=True)
-                except Exception as e:
-                    print(f"[traders] leaderboard failed: {type(e).__name__}: {e}", flush=True)
-            for t in sel.get("traders", []):
-                board.setdefault(t["address"], t)
             try:
                 prices, rate_bid, rate_ask = await wallex_prices(client)
             except Exception as e:
                 print(f"[traders] wallex prices failed: {e}", flush=True)
                 await asyncio.sleep(POLL_SECONDS)
                 continue
+            # daily (books change), and every 10 minutes while the pick is empty (a failed or empty leaderboard read)
+            if now - sel.get("at", 0) > (RESELECT_SECONDS if sel.get("traders") else 600) or sel.get("v") != 2:
+                try:
+                    rows = await hl.leaderboard()
+                    picked = await pick_copyable(hl, rows, set(prices))
+                    board = {r["address"]: r for r in rows}
+                    sel = {"at": now, "v": 2, "traders": picked}
+                    save_json(directory / "selection.json", sel)
+                    print(f"[traders] picked {[p['address'] for p in picked]}", flush=True)
+                except Exception as e:
+                    print(f"[traders] leaderboard failed: {type(e).__name__}: {e}", flush=True)
+            for t in sel.get("traders", []):
+                board.setdefault(t["address"], t)
             for t in followed(directory):
                 f = followers.get(t["address"])
                 if not f:
