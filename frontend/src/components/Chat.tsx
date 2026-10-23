@@ -15,17 +15,17 @@ type Part =
 
 interface Msg { role: "user" | "assistant"; text?: string; parts: Part[] }
 
-const SUGGESTIONS = [
-  ["نقشه بازار", "یه نقشه حرارتی از بازار تتری نشونم بده"],
-  ["مقایسه", "عملکرد BTC، ETH و SOL رو در ۷۲ ساعت اخیر روی نمودار مقایسه کن"],
-  ["برنامه‌ریزی", "می‌خوام روی SOLUSDT شورت بزنم؛ یه پلنر پوزیشن با اهرم ۴ بهم بده"],
-  ["هشدار", "اگه بیت‌کوین زیر ۸۰ هزار دلار رفت بهم هشدار بده"],
-  ["بازارها", "سودده‌ترین بازارهای تتری ۴ ساعت اخیر رو لیست کن"],
-  ["عمق بازار", "عمق بازار BTCUSDT رو تحلیل کن؛ فشار خرید بیشتره یا فروش؟"],
-  ["احساسات", "شاخص ترس و طمع الان چنده و بازار والکس چه وضعی داره؟"],
-  ["اخبار", "مهم‌ترین اخبار امروز بیت‌کوین و اتریوم چیه؟"],
-  ["فیوچرز", "یه پوزیشن لانگ ETHUSDT با اهرم ۳ و مارجین ۵۰ تتر با حد ضرر مناسب باز کن"],
-  ["اسپات", "با ۱۰۰ تتر سولانا بخر"],
+const SUGGESTIONS: [string, string, string][] = [
+  ["📊", "نقشه بازار", "یه نقشه حرارتی از بازار تتری نشونم بده"],
+  ["⚖️", "عمق بازار", "عمق بازار BTCUSDT رو تحلیل کن؛ فشار خرید بیشتره یا فروش؟"],
+  ["🔥", "پربازده‌ها", "سودده‌ترین بازارهای تتری ۴ ساعت اخیر رو لیست کن"],
+  ["🧭", "احساسات بازار", "شاخص ترس و طمع الان چنده و بازار والکس چه وضعی داره؟"],
+];
+const QUICK: [string, string][] = [
+  ["مقایسه BTC و ETH", "عملکرد BTC، ETH و SOL رو در ۷۲ ساعت اخیر روی نمودار مقایسه کن"],
+  ["اخبار امروز", "مهم‌ترین اخبار امروز بیت‌کوین و اتریوم چیه؟"],
+  ["هشدار قیمت", "اگه بیت‌کوین زیر ۸۰ هزار دلار رفت بهم هشدار بده"],
+  ["دارایی من", "دارایی‌های حسابم رو با ارزش تومانی نشون بده"],
 ];
 
 const STATUS_FA: Record<string, string> = {
@@ -94,7 +94,9 @@ export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: 
   const [showHist, setShowHist] = useState(false);
   const [hist, setHist] = useState<SessionRow[]>([]);
 
-  useEffect(() => { log.current?.scrollTo({ top: log.current.scrollHeight, behavior: "smooth" }); }, [msgs]);
+  useEffect(() => {   // follow the conversation; the start screen stays at the top
+    if (msgs.length) log.current?.scrollTo({ top: log.current.scrollHeight, behavior: "smooth" });
+  }, [msgs]);
   useEffect(() => { msgsRef.current = msgs; }, [msgs]);
 
   // Save the rendered transcript once a turn settles (the server already saved the LLM side)
@@ -233,7 +235,7 @@ export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: 
 
   return (
     <div className="card chat">
-      <div className="card-h">
+      <div className="card-h chat-h">
         دستیار معاملاتی
         <span className="spacer" />
         <button className={`btn ghost sm ${showHist ? "on" : ""}`} onClick={toggleHist} aria-expanded={showHist}>
@@ -261,13 +263,17 @@ export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: 
       <div className="chat-log" ref={log}>
         {msgs.length === 0 && (
           <div className="empty">
-            <div className="brand-mark" style={{ margin: "0 auto", width: 44, height: 44, color: "#fff", fontSize: 20 }}>W</div>
-            <h2>به ایجنت والکس چی بگم؟</h2>
-            <p>تحلیل بازار، عمق بازار، اخبار، و اجرای معامله اسپات و فیوچرز — هر معامله قبل از اجرا از شما تأیید می‌گیرد.</p>
+            <h2>چه کمکی از دستم برمی‌آید؟</h2>
+            <p>تحلیل بازار، اخبار و معامله — هر سفارش پیش از اجرا از شما تأیید می‌گیرد.</p>
             <div className="suggests">
-              {SUGGESTIONS.map(([t, s]) => (
-                <button key={s} className="suggest" onClick={() => send(s)}><b>{t}</b>{s}</button>
+              {SUGGESTIONS.map(([icon, t, s]) => (
+                <button key={s} className="suggest" onClick={() => send(s)}>
+                  <span className="sg-icon" aria-hidden="true">{icon}</span><b>{t}</b><span>{s}</span>
+                </button>
               ))}
+            </div>
+            <div className="quick">
+              {QUICK.map(([t, s]) => <button key={t} className="chip-t" onClick={() => send(s)}>{t}</button>)}
             </div>
           </div>
         )}
@@ -318,7 +324,7 @@ export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: 
         <textarea
           rows={1}
           value={input}
-          placeholder="مثلاً: پوزیشن لانگ BTC رو ببند، یا عمق بازار USDTTMN رو بده…"
+          placeholder="پیامتان را بنویسید…"
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }}
         />

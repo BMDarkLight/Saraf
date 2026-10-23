@@ -1,64 +1,116 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { getJSON } from "../api";
 import { compact, pct, price, tone } from "../format";
+import { countdown, Sparkline, useNow } from "./strategy/common";
+import { CORE_FA, REGIME_FA } from "./strategy/Overview";
+import type { StrategyTab } from "./strategy/StrategyPage";
 
-export function Portfolio({ refreshKey, onAsk, assistantLive, onModeChanged }: {
-  refreshKey: number; onAsk: (text: string) => void; assistantLive?: boolean; onModeChanged?: () => void;
+const ASSET_FA: Record<string, string> = {
+  TMN: "تومان", USDT: "تتر", BTC: "بیت‌کوین", ETH: "اتریوم", SOL: "سولانا", XRP: "ریپل", DOGE: "دوج‌کوین",
+  USOON: "نفت توکنیزه", BNB: "بایننس کوین", PEPE: "پپه",
+};
+const ASSET_COLOR: Record<string, string> = { TMN: "var(--muted)", USDT: "var(--s-usdt)" };
+const PALETTE = ["#8b5cf6", "var(--s-eq)", "#14b8a6", "#ec4899", "#f59e0b"];
+
+/** The right rail of the trade view: what the account holds, and a one-glance engine status. Everything about
+ *  the engine's internals (decisions, queue, trades, settings) lives on the strategy page. */
+export function Portfolio({ refreshKey, assistantLive, onOpenStrategy }: {
+  refreshKey: number; assistantLive?: boolean; onOpenStrategy: (tab: StrategyTab) => void;
 }) {
-  const [tab, setTab] = useState<"account" | "spot">("account");
-  const [d, setD] = useState<any>(null);
   const [acc, setAcc] = useState<any>(null);
-  const reloadAcc = useRef<() => void>(() => {});
+  const [paper, setPaper] = useState<any>(null);
+  const [strat, setStrat] = useState<any>(null);
+  const [showPaper, setShowPaper] = useState(false);
 
   useEffect(() => {
     let live = true;
-    const load = () => getJSON("/api/portfolio").then((x) => live && setD(x)).catch(() => {});
+    const load = () => {
+      getJSON("/api/account").then((x) => live && setAcc(x)).catch(() => {});
+      getJSON("/api/strategy").then((x) => live && setStrat(x)).catch(() => {});
+    };
     load();
-    const t = setInterval(load, 5000);
-    return () => { live = false; clearInterval(t); };
-  }, [refreshKey]);
-
-  useEffect(() => {
-    let live = true;
-    const load = () => getJSON("/api/account").then((x) => live && setAcc(x)).catch(() => {});
-    load();
-    reloadAcc.current = load;
     const t = setInterval(load, 15000);
     return () => { live = false; clearInterval(t); };
   }, [refreshKey]);
 
-  const fw = d?.futures?.wallets ?? {};
+  useEffect(() => {
+    if (!showPaper) return;
+    let live = true;
+    const load = () => getJSON("/api/portfolio").then((x) => live && setPaper(x)).catch(() => {});
+    load();
+    const t = setInterval(load, 5000);
+    return () => { live = false; clearInterval(t); };
+  }, [showPaper, refreshKey]);
+
   return (
-    <div className="card portfolio-card">
+    <>
+      <AccountCard acc={acc} capital={strat?.engine?.capital_tmn ?? 5_000_000} />
+      <EngineCard d={strat} onOpen={onOpenStrategy} />
+      {!assistantLive && (
+        <button className="link-btn" onClick={() => setShowPaper(!showPaper)}>
+          {showPaper ? "بستن حساب آزمایشی چت" : "حساب آزمایشی چت (کاغذی)"}
+        </button>
+      )}
+      {showPaper && !assistantLive && <PaperCard d={paper} />}
+    </>
+  );
+}
+
+function AccountCard({ acc, capital }: { acc: any; capital: number }) {
+  if (!acc) return <div className="card rail-card"><div className="card-b muted">در حال بارگذاری…</div></div>;
+  const spot = acc.spot;
+  const total = spot?.total_value_tmn ?? null;
+  const k = spot && spot.total_value_usdt ? spot.total_value_tmn / spot.total_value_usdt : 0;   // TMN per USDT
+  const rows = Object.entries(spot?.balances ?? {})
+    .map(([asset, b]: any) => ({ asset, total: b.total, locked: b.locked, tmn: (b.value_usdt ?? 0) * k }))
+    .filter((r) => r.tmn > 1)
+    .sort((a, b) => b.tmn - a.tmn);
+  const ret = total != null && capital ? (100 * (total - capital)) / capital : null;
+  let pi = 0;
+  const color = (a: string) => ASSET_COLOR[a] ?? PALETTE[pi++ % PALETTE.length];
+  const colored = rows.map((r) => ({ ...r, color: color(r.asset) }));
+  return (
+    <div className="card rail-card">
       <div className="card-h">
-        پورتفو
+        حساب {acc.sub_account ? "اعتبار معاملاتی" : "والکس"}
         <span className="spacer" />
-        <div className="seg">
-          <button className={tab === "account" ? "on" : ""} onClick={() => setTab("account")}>حساب والکس</button>
-          {!assistantLive && <button className={tab === "spot" ? "on" : ""} onClick={() => setTab("spot")}>اسپات آزمایشی</button>}
-        </div>
+        {acc.has_key && <span className="tag-real">واقعی</span>}
       </div>
-      <div className="scroll" style={{ flex: 1 }}>
-        {tab === "account" ? (
-          <RealAccount acc={acc} />
-        ) : (
+      <div className="card-b acct">
+        {!acc.has_key && <div className="muted">کلید API والکس تنظیم نشده است.</div>}
+        {acc.error && <div className="err-box">{acc.error}</div>}
+        {acc.key_warning && <div className="err-box">{acc.key_warning}</div>}
+        {total != null && (
           <>
-            {d?.spot_error && <div className="err-box">{d.spot_error}</div>}
-            {d?.spot && (
-              <div className="total">
-                <span className="muted">ارزش کل</span>
-                <span className="num"><b>{price(d.spot.total_value_usdt)}</b> USDT</span>
+            <div className="acct-total">
+              <b className="num">{price(total)}</b><span>تومان</span>
+            </div>
+            {ret != null && (
+              <div className="acct-ret">
+                <span className={`pill ${ret >= 0 ? "up" : "down"} num`}>{pct(ret)}</span>
+                <span className="muted small">نسبت به سرمایه اولیه {compact(capital)} تومان</span>
               </div>
             )}
-            {Object.entries(d?.spot?.balances ?? {})
-              .sort((a: any, b: any) => b[1].value_usdt - a[1].value_usdt)
-              .map(([asset, b]: any) => (
-                <div className="bal-row" key={asset}>
-                  <b className="ltr">{asset}</b>
-                  <span className="num">{compact(b.total)} <span className="muted" style={{ fontSize: 11 }}>≈ {price(b.value_usdt)}$</span></span>
+            <div className="alloc big" role="img" aria-label="ترکیب دارایی">
+              {colored.map((r) => <span key={r.asset} style={{ flexGrow: r.tmn, background: r.color }} />)}
+            </div>
+            <div className="holdings">
+              {colored.map((r) => (
+                <div className="hold" key={r.asset}>
+                  <i className="dot" style={{ background: r.color }} />
+                  <div className="hold-name">
+                    <b className="ltr">{r.asset}</b>
+                    <span className="muted small">{ASSET_FA[r.asset] ?? ""}</span>
+                  </div>
+                  <span className="spacer" />
+                  <div className="hold-val">
+                    <b className="num">{compact(r.tmn)}</b>
+                    <span className="muted small num">{r.asset === "TMN" ? "" : `${compact(r.total)} ${r.asset}`}{r.locked ? " · قفل" : ""}</span>
+                  </div>
+                  <span className="hold-pct muted num">{total ? Math.round((100 * r.tmn) / total) : 0}%</span>
                 </div>
               ))}
-            {(d?.spot_orders ?? []).length > 0 && <div className="card-b muted" style={{ fontSize: 12 }}>{d.spot_orders.length} سفارش باز</div>}
+            </div>
           </>
         )}
       </div>
@@ -66,145 +118,64 @@ export function Portfolio({ refreshKey, onAsk, assistantLive, onModeChanged }: {
   );
 }
 
-const EVENT_FA: Record<string, string> = {
-  regime: "وضعیت بازار", decision: "تصمیم AI", risk_block: "مسدود توسط ریسک", entry_order: "سفارش ورود",
-  entry: "ورود", entry_cancelled: "لغو ورود", exit: "خروج", review: "بازبینی", circuit_breaker: "توقف اضطراری",
-  error: "خطا", start: "شروع", stop: "پایان",
-};
-const REGIME_FA: Record<string, string> = { risk_on: "ریسک‌پذیر", neutral: "خنثی", risk_off: "ریسک‌گریز" };
-
-function hhmm(iso: string): string {
-  return new Date(iso).toLocaleTimeString("fa-IR", { hour: "2-digit", minute: "2-digit" });
-}
-
-const EXIT_FA: Record<string, string> = {
-  take_profit: "حد سود", stop_loss: "حد ضرر", trailing_stop: "حد ضرر متحرک", time_stop: "پایان زمان",
-  ai_exit: "خروج با نظر AI", challenge_end: "تسویه پایان چالش", drawdown_halt: "توقف اضطراری (افت سرمایه)", session_end: "پایان جلسه",
-};
-
-function Section({ title, count, children }: { title: string; count?: number; children: React.ReactNode }) {
+function EngineCard({ d, onOpen }: { d: any; onOpen: (tab: StrategyTab) => void }) {
+  const now = useNow(30000);
+  const e = d?.engine;
+  if (!e) return null;
+  const end = d.end_time ? Date.parse(d.end_time) : null;
+  const curve: [number, number][] = (d.curve ?? []).map((r: any) => [r.t, r.equity]);
+  const gateOpen = e.regime !== "risk_off";
   return (
-    <div className="eng-sec">
-      <div className="eng-sec-h">{title}{count != null && <span className="count num">{count}</span>}</div>
-      {children}
+    <div className="card rail-card">
+      <div className="card-h">
+        موتور خودکار
+        <span className={`chip mode ${d.mode === "live" ? "live" : ""}`}><span className="dot" />{d.mode === "live" ? "زنده" : "شبیه‌سازی"}</span>
+        <span className="spacer" />
+        <button className="btn ghost sm" onClick={() => onOpen("overview")}>جزئیات</button>
+      </div>
+      <div className="card-b eng-mini">
+        <div className="eng-line">
+          <span>{d.quote === "USDT" ? CORE_FA[e.core?.status] ?? "—" : "بازارهای تومانی"}</span>
+          <span className="sep">·</span>
+          <span>خرید {gateOpen ? <b className="up">باز</b> : <b className="down">بسته</b>} <span className="muted">({REGIME_FA[e.regime] ?? "—"})</span></span>
+          {end && <><span className="sep">·</span><span className="muted">پایان {countdown(end - now)}</span></>}
+        </div>
+        <Sparkline points={curve} base={curve[0]?.[1]} height={44} />
+        {(e.positions ?? []).slice(0, 3).map((p: any) => (
+          <div className="row" key={p.id}>
+            <b className="ltr">{p.symbol}</b>
+            <span className="muted small">پوزیشن باز</span>
+            <span className="spacer" />
+            {p.unrealized_pnl_pct != null && <b className={`num ${tone(p.unrealized_pnl_pct)}`}>{pct(p.unrealized_pnl_pct)}</b>}
+          </div>
+        ))}
+        {!e.positions?.length && <div className="muted small">پوزیشن بازی ندارد · {e.stats?.trades ?? 0} معامله بسته‌شده</div>}
+        <div className="ssum-links">
+          <button className="chip-t" onClick={() => onOpen("tune")}>تنظیمات</button>
+          <button className="chip-t" onClick={() => onOpen("personas")}>کپی‌تریدینگ</button>
+          <button className="chip-t" onClick={() => onOpen("chat")}>دستیار</button>
+        </div>
+      </div>
     </div>
   );
 }
 
-/** The real Wallex account (read-only) and the autonomous engine: stats, order queue, positions, trades, log. */
-function RealAccount({ acc }: { acc: any }) {
-  if (!acc) return <div className="card-b muted">در حال بارگذاری…</div>;
-  const e = acc.engine;
-  const ret = e?.equity_tmn != null ? (100 * (e.equity_tmn - e.capital_tmn)) / e.capital_tmn : null;
-  const st = e?.stats ?? {};
+function PaperCard({ d }: { d: any }) {
   return (
-    <>
-      {!acc.has_key && <div className="card-b muted">کلید API والکس تنظیم نشده است.</div>}
-      {acc.error && <div className="err-box">{acc.error}</div>}
-      {acc.key_warning && <div className="err-box">{acc.key_warning}</div>}
-      {acc.spot && (
-        <>
-          <div className="total">
-            <span className="muted">{acc.sub_account ? "اعتبار معاملاتی (واقعی)" : "حساب اصلی (واقعی)"}</span>
-            <span className="num"><b>{price(acc.spot.total_value_tmn)}</b> تومان</span>
-          </div>
-          {Object.entries(acc.spot.balances ?? {})
-            .sort((a: any, b: any) => b[1].value_usdt - a[1].value_usdt)
-            .map(([asset, b]: any) => (
-              <div className="bal-row" key={asset}>
-                <b className="ltr">{asset}</b>
-                <span className="num">{price(b.total)}{b.locked ? <span className="muted" style={{ fontSize: 11 }}> (قفل {compact(b.locked)})</span> : null}</span>
-              </div>
-            ))}
-        </>
-      )}
-      {e && (
-        <div className="card-b eng">
-          <div className="eng-head">
-            <b>موتور معاملاتی خودکار</b>
-            <span className="spacer" />
-            <span className={`chip mode ${e.mode === "live" ? "live" : ""}`}><span className="dot" />{e.mode === "live" ? "زنده" : "شبیه‌سازی"}</span>
-          </div>
-
-          <div className="eng-stats num">
-            <div><span>ارزش</span><b>{price(e.equity_tmn)}</b></div>
-            <div><span>بازده</span><b className={tone(ret)}>{pct(ret)}</b></div>
-            <div><span>سود محقق‌شده</span><b className={tone(st.realized_pnl_tmn)}>{price(st.realized_pnl_tmn ?? 0)}</b></div>
-            <div><span>معاملات</span><b>{st.trades ?? 0}</b></div>
-            <div><span>نرخ برد</span><b>{st.win_rate_pct != null ? `${st.win_rate_pct}%` : "—"}</b></div>
-            <div><span>افت از سقف</span><b>{e.drawdown_pct != null ? `${e.drawdown_pct.toFixed(2)}%` : "—"}</b></div>
-          </div>
-          {e.regime && (
-            <div className="eng-regime">
-              <span className="muted">وضعیت بازار: </span><b>{REGIME_FA[e.regime] ?? e.regime}</b>
-              {e.regime_reason && <div className="muted clamp">{e.regime_reason}</div>}
+    <div className="card rail-card">
+      <div className="card-h">حساب آزمایشی چت<span className="spacer" /><span className="pill">کاغذی</span></div>
+      <div className="card-b acct">
+        {d?.spot_error && <div className="err-box">{d.spot_error}</div>}
+        {d?.spot && <div className="acct-total"><b className="num">{price(d.spot.total_value_usdt)}</b><span>USDT</span></div>}
+        <div className="holdings">
+          {Object.entries(d?.spot?.balances ?? {}).sort((a: any, b: any) => b[1].value_usdt - a[1].value_usdt).map(([asset, b]: any) => (
+            <div className="hold" key={asset}>
+              <b className="ltr">{asset}</b><span className="spacer" />
+              <span className="num">{compact(b.total)} <span className="muted small">≈ {price(b.value_usdt)}$</span></span>
             </div>
-          )}
-          {e.halted && <div className="err-box" style={{ margin: 0 }}>موتور به دلیل افت سرمایه متوقف شده است.</div>}
-
-          <Section title="صف سفارش‌ها" count={e.pending?.length ?? 0}>
-            {(e.pending ?? []).map((o: any, i: number) => (
-              <div className="eng-row" key={i}>
-                <span className="side LONG">خرید</span>
-                <b className="ltr">{o.symbol}</b>
-                <span className="num">@ {price(o.limit)}</span>
-                <span className="spacer" />
-                <span className="muted num">{o.amount_tmn ? `${compact(o.amount_tmn)} TMN` : ""}</span>
-              </div>
-            ))}
-            {!e.pending?.length && <div className="muted empty-line">سفارش لیمیتی در صف نیست.</div>}
-          </Section>
-
-          <Section title="پوزیشن‌های باز" count={e.positions?.length ?? 0}>
-            {(e.positions ?? []).map((p: any) => (
-              <div className="pos" key={p.id} style={{ padding: "6px 0" }}>
-                <div className="pos-top">
-                  <span className="side LONG">خرید</span>
-                  <b className="ltr">{p.symbol}</b>
-                  <span className="spacer" style={{ flex: 1 }} />
-                  {p.unrealized_pnl_tmn != null && (
-                    <span className={`num ${tone(p.unrealized_pnl_tmn)}`} style={{ fontWeight: 700 }}>
-                      {price(p.unrealized_pnl_tmn)} <small>({pct(p.unrealized_pnl_pct)})</small>
-                    </span>
-                  )}
-                </div>
-                <div className="stat-grid num">
-                  <div><span>ورود</span>{price(p.entry_price)}</div>
-                  <div><span>حد سود</span>{price(p.target)}</div>
-                  <div><span>حد ضرر</span>{price(p.stop)}</div>
-                </div>
-              </div>
-            ))}
-            {!e.positions?.length && <div className="muted empty-line">پوزیشن بازی ندارد.</div>}
-          </Section>
-
-          <Section title="معاملات انجام‌شده" count={st.trades ?? 0}>
-            {(e.trades ?? []).slice(0, 10).map((tr: any) => (
-              <div className="eng-row" key={tr.id}>
-                <b className="ltr">{tr.symbol}</b>
-                <span className="muted">{EXIT_FA[tr.reason] ?? tr.reason}</span>
-                <span className="spacer" />
-                <span className={`num ${tone(tr.pnl_tmn)}`}>{price(tr.pnl_tmn)} <small>({pct(tr.pnl_pct)})</small></span>
-              </div>
-            ))}
-            {!e.trades?.length && <div className="muted empty-line">هنوز معامله‌ای بسته نشده.</div>}
-          </Section>
-
-          <Section title="آخرین تصمیم‌ها">
-            {(e.events ?? []).slice(0, 12).map((ev: any, i: number) => (
-              <div className="eng-ev" key={i}>
-                <span className="muted num">{hhmm(ev.time)}</span>{" "}
-                <b>{EVENT_FA[ev.event] ?? ev.event}</b>{" "}
-                {ev.symbol && <span className="ltr">{ev.symbol}</span>}{" "}
-                {ev.action && <span className={ev.action === "TAKE" ? "up" : "muted"}>{ev.action}</span>}
-                {ev.pnl_pct != null && <span className={tone(ev.pnl_pct)}> {pct(ev.pnl_pct)}</span>}
-                {ev.reason && <div className="muted clamp">{String(ev.reason)}</div>}
-              </div>
-            ))}
-            {!e.events?.length && <div className="muted empty-line">موتور تازه شروع شده؛ تصمیم‌ها با بسته شدن هر کندل ۱۵ دقیقه‌ای اینجا می‌آیند.</div>}
-          </Section>
+          ))}
         </div>
-      )}
-    </>
+      </div>
+    </div>
   );
 }

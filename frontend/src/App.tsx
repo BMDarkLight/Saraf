@@ -7,7 +7,6 @@ import { Markets } from "./components/Markets";
 import { OrderBook } from "./components/OrderBook";
 import { Portfolio } from "./components/Portfolio";
 import { PriceChart } from "./components/PriceChart";
-import { Strategy } from "./components/Strategy";
 import { StrategyPage, type StrategyTab } from "./components/strategy/StrategyPage";
 
 type Tab = "markets" | "chat" | "trade" | "strategy";
@@ -160,13 +159,12 @@ export default function App() {
           <Chat ref={chat} onTrade={() => setRefresh((x) => x + 1)} onSymbol={setSymbol} />
         </section>
         <section className={`col side-left ${tab === "trade" ? "active" : ""}`}>
-          <Strategy onOpen={openStrategy} />
-          <Portfolio refreshKey={refresh} onAsk={ask} assistantLive={cfg?.spot_mode === "live"} onModeChanged={reloadCfg} />
+          <Portfolio refreshKey={refresh} assistantLive={cfg?.spot_mode === "live"} onOpenStrategy={openStrategy} />
         </section>
       </main>
       <AlertToasts onAsk={ask} />
       <nav className="mobile-tabs">
-        {([["markets", "بازار"], ["chat", "ایجنت"], ["trade", "پورتفو"], ["strategy", "استراتژی"]] as const).map(([k, l]) => (
+        {([["markets", "بازار"], ["chat", "ایجنت"], ["trade", "دارایی"], ["strategy", "استراتژی"]] as const).map(([k, l]) => (
           <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)} aria-current={tab === k ? "page" : undefined}>
             {TAB_ICONS[k]}
             {l}
