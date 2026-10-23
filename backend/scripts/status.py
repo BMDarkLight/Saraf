@@ -135,6 +135,50 @@ async def market_facts() -> None:
         await c.aclose()
 
 
+async def signal_scan() -> None:
+    """Why the satellite does (not) buy: for each market it watches, the live 15m/1h features next to the setups'
+    entry conditions (strategy.py), with the strategy profile's settings."""
+    from wallex_agent.engine import strategy
+    from wallex_agent.engine.features import compute
+    from wallex_agent.engine.feeds import LiveFeed
+    s = get_settings()
+    prof = {}
+    for line in (ROOT / "deploy" / "strategy.env").read_text().splitlines():
+        if "=" in line and not line.startswith("#"):
+            k, v = line.split("=", 1)
+            prof[k.strip().lower()] = v.strip()
+    s = s.model_copy(update={k: type(getattr(s, k))(v) if not isinstance(getattr(s, k), bool) else v == "true"
+                             for k, v in prof.items() if hasattr(s, k)})
+    c = WallexClient(s.wallex_base_url, s.wallex_api_key, sub_account=s.wallex_sub_account_client_id)
+    feed = LiveFeed(c, s)
+    print("\n================ SIGNAL SCAN (strategy profile) ================")
+    print(f"filters: ATR% {s.engine_min_atr_pct}..{s.engine_max_atr_pct}, min score {s.engine_min_score}, setups {s.engine_setups}")
+    try:
+        for sym in await feed.universe():
+            f = compute(*(await feed.bars(sym)))
+            if not f:
+                print(f"{sym:<10} no features (not enough bars)")
+                continue
+            fails = []
+            if f["atr_pct"] < s.engine_min_atr_pct:
+                fails.append(f"ATR {f['atr_pct']:.2f}% < {s.engine_min_atr_pct}")
+            if not f["close"] < f["bb_lower"]:
+                fails.append("not below lower BB")
+            if (f["rsi"] or 50) >= 30:
+                fails.append(f"RSI {f['rsi']:.0f} >= 30")
+            if f["htf_trend"] != "up":
+                fails.append(f"1h trend {f['htf_trend']}")
+            if f["ret_4"] > -1.5:
+                fails.append(f"1h move {f['ret_4']:+.2f}% (dip needs < -1.5%)")
+            cands = strategy.candidates(sym, f, s.engine_min_atr_pct, s.engine_max_atr_pct,
+                                        tuple(x for x in s.engine_setups.split(",") if x))
+            hit = ", ".join(f"{x.setup}({x.score})" for x in cands) or "none"
+            print(f"{sym:<10} close {f['close']:<12.6g} ATR {f['atr_pct']:.2f}% RSI {f['rsi']:.0f} 1h {f['htf_trend']:<5} "
+                  f"4bar {f['ret_4']:+.2f}% | candidates: {hit} | blocks: {'; '.join(fails)}")
+    finally:
+        await c.aclose()
+
+
 def summary(eng: Path) -> None:
     """A short block at the end of the log: what each check reads first."""
     print("\n================ SUMMARY ================")
@@ -174,6 +218,10 @@ def main() -> None:
         asyncio.run(market_facts())
     except Exception as e:
         print("market facts unavailable:", type(e).__name__, e)
+    try:
+        asyncio.run(signal_scan())
+    except Exception as e:
+        print("signal scan unavailable:", type(e).__name__, e)
     summary(eng)
 
 
