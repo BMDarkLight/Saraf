@@ -131,6 +131,20 @@ async def market_facts() -> None:
                                                   for o in await c.open_orders()], default=str)[:2000])
             except Exception as e:
                 print("balances error:", e)
+            # why a market sell placed as a limit through the book can come back unfilled: the book as the API
+            # returns it, and the account's latest fills on the markets the engine sold on
+            for sym in ("BTCUSDT", "USOONUSDT"):
+                try:
+                    book = await c.depth(sym)
+                    print(f"{sym} depth keys {sorted(book)[:6]} bid top3 {book.get('bid', [])[:3]} ask top3 {book.get('ask', [])[:3]}")
+                except Exception as e:
+                    print(f"{sym} depth error:", e)
+            for sym in ("BTCUSDT", "BTCTMN", "USOONUSDT"):
+                try:
+                    fills = await c.my_trades(sym)
+                    print(f"{sym} latest fills:", json.dumps(fills[:4], default=str, ensure_ascii=False)[:900])
+                except Exception as e:
+                    print(f"{sym} fills error:", e)
     finally:
         await c.aclose()
 
