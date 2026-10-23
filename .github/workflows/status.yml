@@ -18,6 +18,9 @@ on:
       consolidate:
         description: "coins to sell into the USDT core on the live engine's next tick, e.g. USOON (the owner's request; empty = none)"
         default: ""
+      probe:
+        description: "\"feeds\" checks whether the VPS reaches the public trader-data sources (Hyperliquid etc.)"
+        default: ""
 
 concurrency:
   group: status-vps
@@ -57,6 +60,10 @@ jobs:
               print("   return_pct:", d.get("return_pct"), "allocation:", d.get("allocation"), "curve points:", len(d.get("curve") or []))
           PY
           done
+      - name: Probe trader-data feeds
+        if: inputs.probe == 'feeds'
+        working-directory: /opt/wallex-agent/backend
+        run: timeout 120 /root/.local/bin/uv run --no-dev python "$GITHUB_WORKSPACE/backend/scripts/probe_feeds.py" || true
       - name: Consolidate request
         if: ${{ inputs.consolidate != '' }}
         env:
