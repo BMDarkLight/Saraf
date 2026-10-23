@@ -25,16 +25,28 @@ def main() -> None:
     b.add_argument("--decider", choices=["ai", "rules", "both"], default="both")
     b.add_argument("--symbols", help="comma-separated; default = current auto universe")
     b.add_argument("--offline", action="store_true", help="AI decisions from cache only (exact replay)")
+    b.add_argument("--persona", help="apply a copy-trading persona's preset (wallex_agent/personas.py)")
     r = sub.add_parser("run")
     r.add_argument("--mode", choices=["shadow", "live"], default=None)
     r.add_argument("--confirm-live", action="store_true")
     r.add_argument("--hours", type=float, help="stop after this many hours (shadow sessions); positions are closed to TMN")
     r.add_argument("--name", help="journal directory under data/engine (default: the mode), for a session that runs "
                                   "beside the main engine")
+    r.add_argument("--persona", help="run a copy-trading persona's preset in shadow (journal: data/engine/persona-<id>)")
     rep = sub.add_parser("report")
     rep.add_argument("dir")
     a = p.parse_args()
     s = get_settings()
+    if getattr(a, "persona", None):
+        from ..personas import BY_ID, run_name
+        from ..tuning import validate
+        if a.persona not in BY_ID:
+            raise SystemExit(f"unknown persona {a.persona!r}; known: {', '.join(BY_ID)}")
+        s = s.model_copy(update=validate(BY_ID[a.persona]["preset"]))
+        if a.cmd == "run":
+            if (a.mode or s.engine_mode) == "live":
+                raise SystemExit("personas run in shadow only; copy one to trade its preset for real")
+            a.name = a.name or run_name(BY_ID[a.persona])
 
     if a.cmd == "backtest":
         from .backtest import run_backtest

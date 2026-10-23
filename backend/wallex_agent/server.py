@@ -27,6 +27,7 @@ from .brokers import BrokerError, LiveSpotBroker, PaperFuturesBroker, PaperSpotB
 from .config import ROOT, get_settings
 from .market import analytics, sentiment
 from .news import web
+from . import personas as persona_mod, strategy_chat, tuning
 from .wallex import WallexError
 
 settings = get_settings()
@@ -321,7 +322,7 @@ def engine_status(mode: str | None = None) -> dict | None:
                "exit_time": t["exit_time"], "entry_price": float(t["entry_price"] or 0),
                "exit_price": float(t["exit_price"] or 0), "pnl_tmn": float(t["pnl_tmn"] or 0),
                "pnl_pct": float(t["pnl_pct"] or 0), "reason": t["exit_reason"]} for t in reversed(trades[-20:])]
-    return {"mode": d.name, "updated": (d / "state.json").stat().st_mtime,
+    return {"mode": d.name, "updated": (d / "state.json").stat().st_mtime, "started_ts": _last_start(d).get("ts"),
             "capital_tmn": settings.engine_capital_tmn,
             "equity_tmn": float(last[1]) if last else None, "cash_tmn": float(last[2]) if last else None,
             "drawdown_pct": float(last[4]) if last else None,
@@ -520,6 +521,34 @@ def _last_start(d: Path) -> dict:
     return {}
 
 
+_stretch_cache: dict = {}
+
+
+def _stretch_start(d: Path, quote: str) -> float:
+    """When the run's current setup began: the first start of the newest unbroken series of starts with this quote
+    (restarts and deploys keep the curve; a switch between TMN and USDT markets begins a new one)."""
+    f = d / "decisions.jsonl"
+    key = (str(f), f.stat().st_size if f.exists() else 0, quote)
+    if key in _stretch_cache:
+        return _stretch_cache[key]
+    begin = 0.0
+    with contextlib.suppress(OSError):
+        with f.open() as fh:
+            for line in fh:
+                if '"event": "start"' not in line:
+                    continue
+                with contextlib.suppress(ValueError):
+                    e = json.loads(line)
+                    q = (e.get("config") or {}).get("engine_quote", "TMN")
+                    if q != quote:
+                        begin = 0.0
+                    elif not begin:
+                        begin = e["ts"]
+    _stretch_cache.clear()
+    _stretch_cache[key] = begin
+    return begin
+
+
 @app.get("/api/strategy")
 async def strategy():
     """The running strategy for the strategy panel: phase, USDT core, satellite limits, the end-of-challenge
@@ -535,8 +564,9 @@ async def strategy():
     rows = []
     with contextlib.suppress(OSError):
         rows = [r.split(",") for r in (engine_dir(mode) / "equity.csv").read_text().strip().splitlines()[1:]]
-    if start.get("ts") and mode != STRATEGY_RUN:   # its own dir spans restarts; live/shadow dirs saw other setups
-        rows = [r for r in rows if float(r[0]) >= start["ts"] - 60] or rows[-1:]
+    if start.get("ts") and mode != STRATEGY_RUN:   # live/shadow dirs saw other setups: from when this quote began
+        since = _stretch_start(engine_dir(mode), cfg.get("engine_quote", "TMN"))
+        rows = [r for r in rows if float(r[0]) >= since - 60] or rows[-1:]
     step = max(1, len(rows) // 240)
     pts = [(int(r[0]), float(r[1])) for r in rows[::step]]
     if rows and (len(rows) - 1) % step:   # always end on the newest mark
@@ -554,7 +584,21 @@ async def strategy():
     base = next((b for b in bench if b), None)
     capital = eng["capital_tmn"]
     first = pts[0][1] if pts else capital
+    # what the engine manages vs coins bought outside it (by hand / the chat): the latter is not the satellite
+    managed = 0.0
+    if eng["positions"]:
+        with contextlib.suppress(WallexError, KeyError, ValueError, TypeError):
+            markets = await ctx.client.markets()
+            usdt_tmn = float(markets["USDTTMN"]["stats"]["lastPrice"])
+            for p in eng["positions"]:
+                last = float(markets[p["symbol"]]["stats"]["lastPrice"])
+                managed += last * p["qty"] * (usdt_tmn if p.get("quote") == "USDT" else 1.0)
+    pending = sum(float(o.get("amount_tmn") or 0) for o in eng["pending"])
+    exposure = eng.get("exposure_tmn") or 0.0
     return {
+        "return_pct": round(100 * (eng["equity_tmn"] / capital - 1), 3) if eng.get("equity_tmn") else None,
+        "allocation": {"satellite_tmn": round(managed + pending),
+                       "other_coins_tmn": round(max(0.0, exposure - managed - pending))},
         "mode": start.get("mode") or mode, "run": mode, "engine": eng, "strategy_live": strategy_is_live(),
         "live_at": strategy_live_at(), "quote": cfg.get("engine_quote", "TMN"), "started": start.get("time"),
         "end_time": cfg.get("engine_end_time") or settings.engine_end_time or None,
@@ -566,6 +610,192 @@ async def strategy():
         "curve": [{"t": t, "equity": round(e), "hold_usdt": round(first * b / base) if b and base else None,
                    "hold_tmn": round(first)} for (t, e), b in zip(pts, bench)],
     }
+
+
+# ---------------------------------------------------------- tuning, personas, strategy chat
+TUNING_FILE = ROOT / "data" / "engine" / "tuning.env"   # loaded by wallex-engine.service after the profile
+COPY_FILE = ROOT / "data" / "engine" / "copy.json"      # which persona the main engine copies: {"id", "at", "modified"}
+
+
+def copying() -> dict | None:
+    try:
+        return json.loads(COPY_FILE.read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def effective_settings() -> dict:
+    """What the main engine runs with: its last start's config (the restart applies saved changes), else this
+    process's settings plus the saved overrides."""
+    d = engine_dir(requested_engine_mode())
+    cfg = (_last_start(d).get("config") or {}) if d else {}
+    over = tuning.read_env(TUNING_FILE)
+    out = {}
+    for p in tuning.PARAMS:
+        k = p["key"]
+        v = cfg.get(k, over.get(k, getattr(settings, k, None)))
+        try:
+            out[k] = tuning.validate({k: v})[k]
+        except tuning.TuningError:
+            out[k] = v
+    return out
+
+
+def _engine_brief() -> dict:
+    eng = engine_status(requested_engine_mode()) or {}
+    return {k: eng.get(k) for k in ("mode", "equity_tmn", "cash_tmn", "exposure_tmn", "drawdown_pct", "regime",
+                                    "regime_reason", "stats", "core")} | {
+        "open_positions": [p.get("symbol") for p in eng.get("positions", [])],
+        "recent_events": [{k: e.get(k) for k in ("time", "event", "symbol", "reason")} for e in eng.get("events", [])[:8]]}
+
+
+@app.get("/api/strategy/tuning")
+async def get_tuning():
+    return {"params": tuning.PARAMS, "groups": tuning.GROUPS, "values": effective_settings(),
+            "overrides": tuning.read_env(TUNING_FILE), "copying": copying(), "live": requested_engine_mode() == "live",
+            "pending_restart": TUNING_FILE.exists() and TUNING_FILE.stat().st_mtime > (
+                (engine_status(requested_engine_mode()) or {}).get("started_ts") or 0)}
+
+
+class TuningIn(BaseModel):
+    values: dict = {}
+    reset: bool = False      # drop every saved override first (back to the strategy profile)
+    confirm: str = ""        # "LIVE" when the engine trades real money
+
+
+def _check_live_confirm(confirm: str) -> None:
+    if requested_engine_mode() == "live" and confirm != "LIVE":
+        raise HTTPException(400, "the engine trades real money: changing its settings needs confirm=LIVE")
+
+
+@app.post("/api/strategy/tuning")
+async def set_tuning(body: TuningIn):
+    """Save setting overrides for the main engine and restart it so they take effect."""
+    try:
+        new = tuning.validate(body.values)
+        merged = new if body.reset else {**tuning.read_env(TUNING_FILE), **new}
+        tuning.validate(merged)
+    except tuning.TuningError as e:
+        raise HTTPException(400, str(e))
+    _check_live_confirm(body.confirm)
+    _need_systemd()
+    _write_tuning(merged)
+    cp = copying()
+    if cp and not body.reset:
+        COPY_FILE.write_text(json.dumps({**cp, "modified": True}))
+    elif body.reset:
+        COPY_FILE.unlink(missing_ok=True)
+    await _restart_engine()
+    return {"ok": True, "overrides": merged}
+
+
+def _write_tuning(values: dict) -> None:
+    TUNING_FILE.parent.mkdir(parents=True, exist_ok=True)
+    if values:
+        TUNING_FILE.write_text("# saved from the UI (strategy tuning / copy-trading); wallex_agent/tuning.py\n"
+                               + tuning.to_env(values))
+    else:
+        TUNING_FILE.unlink(missing_ok=True)
+
+
+def _persona_record(p: dict) -> dict:
+    """A persona's public profile plus its track record from its own shadow journal."""
+    d = ROOT / "data" / "engine" / persona_mod.run_name(p)
+    rec = {k: p[k] for k in ("id", "name", "handle", "tagline", "bio", "glyph", "hue", "risk", "style", "preset")}
+    rec["run"] = persona_mod.run_name(p)
+    rows = []
+    with contextlib.suppress(OSError):
+        rows = [r.split(",") for r in (d / "equity.csv").read_text().strip().splitlines()[1:]]
+    trades = []
+    with contextlib.suppress(OSError):
+        with (d / "trades.csv").open() as f:
+            trades = list(csv.DictReader(f))
+    capital = settings.engine_capital_tmn
+    eq = [float(r[1]) for r in rows]
+    peak, dd = capital, 0.0
+    for v in eq:
+        peak = max(peak, v)
+        dd = max(dd, 1 - v / peak)
+    step = max(1, len(rows) // 80)
+    pnls = [float(t["pnl_tmn"] or 0) for t in trades]
+    state = {}
+    with contextlib.suppress(OSError, ValueError):
+        state = json.loads((d / "state.json").read_text())
+    updated = (d / "state.json").stat().st_mtime if (d / "state.json").exists() else None
+    rec.update({
+        "active": bool(updated and time.time() - updated < 600),
+        "since": int(rows[0][0]) if rows else None,
+        "equity_tmn": eq[-1] if eq else None,
+        "return_pct": round(100 * (eq[-1] / capital - 1), 2) if eq else None,
+        "max_drawdown_pct": round(100 * dd, 2) if eq else None,
+        "trades": len(trades), "wins": sum(1 for x in pnls if x > 0),
+        "win_rate_pct": round(100 * sum(1 for x in pnls if x > 0) / len(pnls), 1) if pnls else None,
+        "realized_pnl_tmn": round(sum(pnls)),
+        "open_positions": [x.get("symbol") for x in state.get("positions", {}).values()],
+        "core": (state.get("core") or {}).get("status"),
+        "curve": [[int(r[0]), round(float(r[1]))] for r in rows[::step]] + ([[int(rows[-1][0]), round(float(rows[-1][1]))]]
+                                                                             if rows and (len(rows) - 1) % step else []),
+        "recent_trades": [{k: t.get(k) for k in ("symbol", "setup", "exit_time", "pnl_pct", "exit_reason")}
+                          for t in reversed(trades[-6:])],
+    })
+    bt = ROOT / "results" / "personas" / f"{p['id']}.json"
+    with contextlib.suppress(OSError, ValueError):
+        rec["backtest"] = json.loads(bt.read_text())
+    return rec
+
+
+@app.get("/api/personas")
+async def list_personas():
+    return {"personas": [_persona_record(p) for p in persona_mod.PERSONAS], "copying": copying(),
+            "live": requested_engine_mode() == "live", "strategy_live": strategy_is_live()}
+
+
+class CopyIn(BaseModel):
+    confirm: str = ""
+
+
+@app.post("/api/personas/{persona_id}/copy")
+async def copy_persona(persona_id: str, body: CopyIn):
+    """Copy a persona: the main engine takes its preset (on top of the strategy profile) and restarts. The app's
+    mode is not changed: in live mode the engine then trades the persona's rules with real money."""
+    p = persona_mod.BY_ID.get(persona_id)
+    if not p:
+        raise HTTPException(404, "unknown persona")
+    _check_live_confirm(body.confirm)
+    _need_systemd()
+    STRATEGY_PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    STRATEGY_PROFILE_FILE.write_text(STRATEGY_ENV.read_text())   # personas are built on the strategy profile
+    _write_tuning(tuning.validate(p["preset"]))
+    COPY_FILE.write_text(json.dumps({"id": p["id"], "name": p["name"], "at": time.time(), "modified": False},
+                                    ensure_ascii=False))
+    await _restart_engine()
+    return {"ok": True, "copying": copying()}
+
+
+@app.post("/api/personas/stop-copy")
+async def stop_copy(body: CopyIn):
+    _check_live_confirm(body.confirm)
+    _need_systemd()
+    COPY_FILE.unlink(missing_ok=True)
+    _write_tuning({})
+    await _restart_engine()
+    return {"ok": True}
+
+
+class StrategyChatIn(BaseModel):
+    messages: list[dict]
+
+
+@app.post("/api/strategy/chat")
+async def chat_strategy(body: StrategyChatIn):
+    if not settings.llm_api_key:
+        raise HTTPException(400, "LLM_API_KEY is not set")
+    cp = copying()
+    try:
+        return await strategy_chat.ask(settings, body.messages, effective_settings(), _engine_brief(),
+                                       cp.get("name") if cp else None)
+    except Exception as e:   # provider errors (budget, timeout) are shown in the chat, not as a 500
+        raise HTTPException(502, f"LLM: {type(e).__name__}: {str(e)[:300]}")
 
 
 @app.get("/api/alerts")

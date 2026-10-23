@@ -184,7 +184,7 @@ class Engine:
             await self._review_positions(now)
 
         cands = []
-        for sym in await self.feed.universe():
+        for sym in (await self.feed.universe() if self.setups else []):   # no setups: the USDT core only
             try:
                 bars, htf = await self.feed.bars(sym)
             except Exception as e:

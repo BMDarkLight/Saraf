@@ -10,6 +10,8 @@ EnvironmentFile=/opt/wallex-agent/.env
 EnvironmentFile=-/opt/wallex-agent/data/engine/mode.env
 # the strategy card's real-mode switch copies deploy/strategy.env here (absent = default TMN-market settings)
 EnvironmentFile=-/opt/wallex-agent/data/engine/profile.env
+# settings saved from the strategy card's tuning tab or by copying a persona (wallex_agent/tuning.py)
+EnvironmentFile=-/opt/wallex-agent/data/engine/tuning.env
 # the challenge window (deploy/challenge.env, tracked in git) is loaded last so a push can move it
 EnvironmentFile=-/opt/wallex-agent/deploy/challenge.env
 Environment=PYTHONUNBUFFERED=1 TZ=UTC

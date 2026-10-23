@@ -107,13 +107,29 @@ uv run python -m wallex_agent.engine backtest --days 7 --end 2026-10-22T21:00:00
 
 | Finding | Effect | Fix |
 |---|---|---|
-| 5M TMN is ~26 USDT; Wallex's USDT-market minimum is 5 USDT, and the engine needs 1.2x that (~1.14M TMN, 23% of equity). The profile capped a position at 12.5% and exposure at 30% x 0.67 (neutral) = 20% | **The satellite could never place an order**: every signal that passed the gate ended in "size below the minimum order". The 7-day backtest's "0 satellite trades" was this as much as the gate | `risk.size` takes the exchange minimum when its loss at the stop fits the per-trade risk budget, the exposure room and the cash; profile: exposure 50%, position 25%, 2 positions |
+| 5M TMN is ~18 USDT (USDT/TMN ~273k); Wallex's USDT-market minimum is 5 USDT, and the engine needs 1.2x that (~1.64M TMN, 33% of equity). The profile capped a position at 12.5% and exposure at 30% x 0.67 (neutral) = 20% | **The satellite could never place an order**: every signal that passed the gate ended in "size below the minimum order". The 7-day backtest's "0 satellite trades" was this as much as the gate | `risk.size` takes the exchange minimum when its loss at the stop fits the per-trade risk budget, the exposure room and the cash; profile: exposure 50%, position 25%, 2 positions |
 | Live breadth gate counted **TMN** markets, while the satellite trades USDT markets and the backtest measured breadth on the USDT universe | A strengthening toman read as a broad sell-off (risk_off: no entries) and a weakening one as strength; backtest and live applied different gates | breadth is measured on the markets of `ENGINE_QUOTE` |
 | An LLM failure (timeout, spent budget, bad JSON) made every entry a fail-safe SKIP | A provider outage silently stopped all trading | entries fall back to the rule baseline (which beat the AI in every backtest above); regime and reviews keep their safe defaults |
 | `deploy/strategy.env` reached the live engine only through a copy made when the switch was pressed | Strategy changes pushed later never reached the live engine | `deploy.sh` refreshes `data/engine/profile.env` when the strategy is live |
 | `ENGINE_END_TIME` lived only in the server's `.env` | Moving the challenge window needed shell access | `deploy/challenge.env` (tracked, loaded last by all three services) |
 
-## 7. Remaining steps
+| ~80% of the live account sat in USOON bought outside the engine; the end flatten sold only the engine's own positions | That part would never be realized in TMN | the final sweep sells every other coin with a market before the end (`ENGINE_FINAL_SWEEP`) |
+
+## 7. Tuning, copy-trading and the strategy chat
+
+The strategy is a page of its own in the UI (header switch «استراتژی»), with five tabs:
+
+| Tab | What it does | Where |
+|---|---|---|
+| Overview | return vs capital and vs holding USDT, the curve, where the money is (core / satellite / coins bought outside the engine / TMN), the gate, positions, the end-of-challenge plan, the latest decisions | `strategy/Overview.tsx`, `GET /api/strategy` |
+| Tuning | ~20 bounded engine settings (size and risk, entries, execution, AI, core and end). Saved to `data/engine/tuning.env`, which `wallex-engine.service` loads after the profile; the engine restarts. Live mode asks first | `wallex_agent/tuning.py`, `GET/POST /api/strategy/tuning` |
+| Copy-trading | personas = named presets of those settings. Each runs as its own shadow session (`wallex-persona@<id>.service`, journal `data/engine/persona-<id>`), so a profile shows a real track record. Copying writes the preset to `tuning.env` on the strategy profile | `wallex_agent/personas.py`, `GET /api/personas`, `POST /api/personas/{id}/copy`, `/api/personas/stop-copy` |
+| Assistant | a chat about the strategy; the model may propose changes (validated against the tuning bounds), shown as a diff the person applies | `wallex_agent/strategy_chat.py`, `POST /api/strategy/chat` |
+| Evidence | the research table above | |
+
+Personas other than the strategist use the rule decider, so several sessions don't spend the engine's LLM budget.
+
+## 8. Remaining steps
 
 1. The challenge ends **Monday 2026-10-26 23:59 Tehran** (`deploy/challenge.env`, `2026-10-26T20:29:00Z`), extended
    by two days. No new entries after T-4h, the AI-timed USDT exit opens at T-6h, everything is in TMN by T-45min.

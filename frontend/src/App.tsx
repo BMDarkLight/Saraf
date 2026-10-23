@@ -8,8 +8,9 @@ import { OrderBook } from "./components/OrderBook";
 import { Portfolio } from "./components/Portfolio";
 import { PriceChart } from "./components/PriceChart";
 import { Strategy } from "./components/Strategy";
+import { StrategyPage, type StrategyTab } from "./components/strategy/StrategyPage";
 
-type Tab = "markets" | "chat" | "trade";
+type Tab = "markets" | "chat" | "trade" | "strategy";
 
 const icon = (d: string) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -20,6 +21,7 @@ const TAB_ICONS: Record<Tab, React.ReactNode> = {
   markets: icon("M4 6h16M4 12h16M4 18h10"),
   chat: icon("M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"),
   trade: icon("M4 19V5m0 14h16M8 15l4-5 3 3 5-6"),
+  strategy: icon("M12 3v3m0 12v3M3 12h3m12 0h3M7 7l2 2m6 6 2 2M7 17l2-2m6-6 2-2M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"),
 };
 
 function initialTheme(): string {
@@ -78,6 +80,8 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("chat");
   const [refresh, setRefresh] = useState(0);
   const [theme, setTheme] = useState(initialTheme);
+  const [sTab, setSTab] = useState<StrategyTab>("overview");
+  const openStrategy = (t: StrategyTab) => { setSTab(t); setTab("strategy"); };
   const chat = useRef<ChatHandle>(null);
 
   const reloadCfg = () => {
@@ -103,6 +107,10 @@ export default function App() {
           <div className="brand-mark">W</div>
           <span>والکس <small>ایجنت</small></span>
         </div>
+        <nav className="seg view-switch" aria-label="بخش">
+          <button className={tab !== "strategy" ? "on" : ""} onClick={() => setTab("chat")}>معامله</button>
+          <button className={tab === "strategy" ? "on" : ""} onClick={() => setTab("strategy")}>استراتژی</button>
+        </nav>
         <span className="spacer" />
         {cfg && (
           <>
@@ -123,6 +131,11 @@ export default function App() {
           کلید LLM تنظیم نشده — LLM_API_KEY و LLM_BASE_URL را در فایل ‎.env‎ قرار دهید.
         </div>
       )}
+      {tab === "strategy" ? (
+        <main className="spage-wrap">
+          <StrategyPage onModeChanged={reloadCfg} tab={sTab} setTab={setSTab} />
+        </main>
+      ) : (
       <main className="layout">
         <div className="seg side-switch" role="tablist" aria-label="پنل کناری">
           <button className={tab === "markets" ? "on" : ""} onClick={() => setTab("markets")}>بازارها</button>
@@ -141,15 +154,16 @@ export default function App() {
           <Chat ref={chat} onTrade={() => setRefresh((x) => x + 1)} onSymbol={setSymbol} />
         </section>
         <section className={`col side-left ${tab === "trade" ? "active" : ""} ${tab !== "markets" ? "side-on" : ""}`}>
-          <Strategy onModeChanged={reloadCfg} />
+          <Strategy onOpen={openStrategy} />
           <Portfolio refreshKey={refresh} onAsk={ask} assistantLive={cfg?.spot_mode === "live"} onModeChanged={reloadCfg} />
           <OrderBook symbol={symbol} />
           <FearGreed />
         </section>
       </main>
+      )}
       <AlertToasts onAsk={ask} />
       <nav className="mobile-tabs">
-        {([["markets", "بازار و نمودار"], ["chat", "ایجنت"], ["trade", "پورتفو"]] as const).map(([k, l]) => (
+        {([["markets", "بازار"], ["chat", "ایجنت"], ["trade", "پورتفو"], ["strategy", "استراتژی"]] as const).map(([k, l]) => (
           <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)} aria-current={tab === k ? "page" : undefined}>
             {TAB_ICONS[k]}
             {l}

@@ -1,292 +1,61 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { getJSON } from "../api";
-import { compact, pct, price, tone } from "../format";
+import { pct, tone } from "../format";
+import { countdown, Sparkline, useNow } from "./strategy/common";
+import { CORE_FA, REGIME_FA } from "./strategy/Overview";
+import type { StrategyTab } from "./strategy/StrategyPage";
 
-/** The strategy (docs/STRATEGY.md) as it runs: phase, where the money is, the gate, the exit schedule,
- *  equity vs two benchmarks, and the evidence each piece rests on. */
-export function Strategy({ onModeChanged }: { onModeChanged?: () => void }) {
+/** A short summary of the strategy beside the chat; everything else lives on the strategy page. */
+export function Strategy({ onOpen }: { onOpen: (tab: StrategyTab) => void }) {
   const [d, setD] = useState<any>(null);
-  const [view, setView] = useState<"now" | "evidence">("now");
-  const [now, setNow] = useState(Date.now());
-
-  const load = () => getJSON("/api/strategy").then(setD).catch(() => {});
+  const now = useNow(30000);
   useEffect(() => {
+    const load = () => getJSON("/api/strategy").then(setD).catch(() => {});
     load();
     const t = setInterval(load, 30000);
-    const c = setInterval(() => setNow(Date.now()), 1000);
-    return () => { clearInterval(t); clearInterval(c); };
+    return () => clearInterval(t);
   }, []);
-
   const e = d?.engine;
+  const end = d?.end_time ? Date.parse(d.end_time) : null;
+  const curve: [number, number][] = (d?.curve ?? []).map((r: any) => [r.t, r.equity]);
   return (
     <div className="card strategy-card">
       <div className="card-h">
         استراتژی
         {e && <span className={`chip mode ${d.mode === "live" ? "live" : ""}`}><span className="dot" />{d.mode === "live" ? "زنده" : "شبیه‌سازی"}</span>}
         <span className="spacer" />
-        <div className="seg">
-          <button className={view === "now" ? "on" : ""} onClick={() => setView("now")}>وضعیت</button>
-          <button className={view === "evidence" ? "on" : ""} onClick={() => setView("evidence")}>شواهد</button>
-        </div>
+        <button className="btn ghost sm" onClick={() => onOpen("overview")}>مدیریت استراتژی</button>
       </div>
-      <div className="card-b strat">
-        {d && <RealSwitch on={!!d.strategy_live} liveAt={d.live_at} now={now} onChanged={() => {
-          onModeChanged?.();
-          for (const ms of [0, 5000, 15000, 30000]) setTimeout(load, ms);   // the engine restarts in the new mode
-        }} />}
-        {view === "evidence" ? <Evidence /> : !d ? <div className="muted">در حال بارگذاری…</div>
-          : !e ? <div className="muted">موتور هنوز اجرا نشده است.</div>
-          : <Now d={d} now={now} />}
+      <div className="card-b ssum">
+        {!d ? <div className="muted">در حال بارگذاری…</div> : !e ? <div className="muted">موتور هنوز اجرا نشده است.</div> : (
+          <>
+            <div className="ssum-top">
+              <div>
+                <span className="muted small">بازده</span>
+                <b className={`num ${tone(d.return_pct)}`}>{d.return_pct != null ? pct(d.return_pct) : "—"}</b>
+              </div>
+              <div>
+                <span className="muted small">وضعیت</span>
+                <b>{d.quote === "USDT" ? (CORE_FA[e.core?.status] ?? "—") : "بازارهای تومانی"}</b>
+              </div>
+              <div>
+                <span className="muted small">تا پایان</span>
+                <b>{end ? countdown(end - now) : "—"}</b>
+              </div>
+            </div>
+            <Sparkline points={curve} base={curve[0]?.[1]} height={36} />
+            <div className="ssum-gate muted small">
+              دروازه خرید: <b className={e.regime === "risk_off" ? "down" : "up"}>{e.regime === "risk_off" ? "بسته" : "باز"}</b>
+              {" "}({REGIME_FA[e.regime] ?? "—"}) · {e.positions?.length ?? 0} پوزیشن باز
+            </div>
+            <div className="ssum-links">
+              <button className="chip-t" onClick={() => onOpen("tune")}>تنظیمات</button>
+              <button className="chip-t" onClick={() => onOpen("personas")}>کپی‌تریدینگ</button>
+              <button className="chip-t" onClick={() => onOpen("chat")}>دستیار استراتژی</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
-  );
-}
-
-/** Runs the strategy for real: the main engine goes live with the strategy's settings. Asks first, both ways. */
-function RealSwitch({ on, liveAt, now, onChanged }: { on: boolean; liveAt?: number | null; now: number; onChanged: () => void }) {
-  const [ask, setAsk] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const apply = async () => {
-    setBusy(true); setErr("");
-    try {
-      const r = await fetch("/api/strategy/live", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ on: !on, confirm: on ? "" : "LIVE" }),
-      });
-      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail ?? `HTTP ${r.status}`);
-      setAsk(false);
-      onChanged();
-    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
-  };
-  const cancelSchedule = async () => {
-    await fetch("/api/strategy/schedule", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    onChanged();
-  };
-  return (
-    <div className="strat-real">
-      {liveAt && !on && (
-        <div className="mode-line real strat-sched">
-          <span>اجرای واقعی خودکار: <bdi className="num">{hhmm(liveAt * 1000)}</bdi> ({countdown(liveAt * 1000 - now)} دیگر)</span>
-          <span className="spacer" />
-          <button className="btn ghost sm" onClick={cancelSchedule}>لغو</button>
-        </div>
-      )}
-      <div className="seg mode-switch" role="radiogroup" aria-label="اجرای استراتژی">
-        <button role="radio" aria-checked={!on} className={!on ? "on" : ""} onClick={() => on && setAsk(true)}>
-          <span className="dot" />اجرای شبیه‌سازی</button>
-        <button role="radio" aria-checked={on} className={on ? "on live" : ""} onClick={() => !on && setAsk(true)}>
-          <span className="dot" />اجرای واقعی</button>
-      </div>
-      {ask && (
-        <div className={`mode-confirm ${on ? "" : "live"}`} role="dialog">
-          {on ? (
-            <p>اجرای واقعی استراتژی متوقف شود؟ موتور به تنظیمات پیش‌فرض برمی‌گردد و حالت برنامه (بالای صفحه) تغییر
-              نمی‌کند. تتر خریده‌شده فروخته نمی‌شود.</p>
-          ) : (
-            <p><b>استراتژی با پول واقعی اجرا شود؟</b> موتور روی حساب اعتبار معاملاتی تومان آزاد را به تتر تبدیل می‌کند،
-              ماهواره در بازارهای تتری معامله می‌کند و پیش از پایان چالش همه چیز به تومان برمی‌گردد. کل برنامه هم واقعی
-              می‌شود.</p>
-          )}
-          {err && <div className="err-box" style={{ margin: "0 0 8px" }}>{err}</div>}
-          <div className="mode-confirm-actions">
-            <button className={`btn ${on ? "primary" : "danger"}`} disabled={busy} onClick={apply}>
-              {busy ? "…" : on ? "توقف اجرای واقعی" : "بله، اجرای واقعی"}
-            </button>
-            <button className="btn ghost" onClick={() => { setAsk(false); setErr(""); }}>انصراف</button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const PHASES: [string, string][] = [["idle", "تبدیل به تتر"], ["holding", "نگهداری تتر + ماهواره"], ["exiting", "خروج به تومان"]];
-const CORE_FA: Record<string, string> = {
-  idle: "آماده‌سازی", holding: "هسته تتری فعال", guarded: "محافظ فعال: سرمایه در تومان", exiting: "در حال خروج به تومان", done: "تسویه شد",
-};
-const REGIME_FA: Record<string, string> = { risk_on: "ریسک‌پذیر", neutral: "خنثی", risk_off: "ریسک‌گریز" };
-
-function Now({ d, now }: { d: any; now: number }) {
-  const e = d.engine, core = e.core, p = d.params ?? {};
-  const usdtMode = d.quote === "USDT";
-  const status: string = core?.status ?? "idle";
-  const phaseIdx = status === "done" ? 3 : status === "guarded" ? 1 : Math.max(0, PHASES.findIndex(([k]) => k === status));
-  const eq = e.equity_tmn ?? 0, cash = e.cash_tmn ?? 0, exp = e.exposure_tmn ?? 0;
-  // USDT mode: the engine's cash is its free USDT (the core); the rest outside coins is TMN
-  const parts = usdtMode
-    ? [["هسته تتری", cash, "core"], ["ماهواره (رمزارز)", exp, "sat"], ["تومان", Math.max(0, eq - cash - exp), "tmn"]]
-    : [["تومان", cash, "tmn"], ["رمزارز", Math.max(0, eq - cash), "sat"]];
-  const last = d.curve?.[d.curve.length - 1];
-  const ret = (v?: number | null) => (v != null && d.curve?.length ? (100 * (v - d.curve[0].equity)) / d.curve[0].equity : null);
-  const end = d.end_time ? Date.parse(d.end_time) : null;
-
-  return (
-    <>
-      {usdtMode ? (
-        <ol className="phases">
-          {PHASES.map(([k, l], i) => (
-            <li key={k} className={i < phaseIdx ? "done" : i === phaseIdx && status !== "done" ? "on" : ""}>{l}</li>
-          ))}
-        </ol>
-      ) : (
-        <div className="warn-line">این اجرا روی بازارهای تومانی است؛ استراتژی پیشنهادی (هسته تتری) در اجرای شبیه‌سازی است.</div>
-      )}
-      {usdtMode && <div className="strat-status"><b>{CORE_FA[status] ?? status}</b>{core?.entry_rate ? <span className="muted"> — میانگین خرید تتر <bdi className="num">{price(core.entry_rate)}</bdi> تومان</span> : null}</div>}
-
-      <div className="alloc" role="img" aria-label="ترکیب سرمایه">
-        {parts.map(([l, v, k]) => eq > 0 && (v as number) / eq > 0.005 && (
-          <span key={k as string} className={`seg-${k}`} style={{ flexGrow: v as number }} title={`${l}: ${price(v as number)} تومان`} />
-        ))}
-      </div>
-      <div className="alloc-legend">
-        {parts.map(([l, v, k]) => (
-          <span key={k as string}><i className={`sw seg-${k}`} />{l} <b className="num">{eq ? Math.round((100 * (v as number)) / eq) : 0}%</b></span>
-        ))}
-      </div>
-
-      <div className="eng-stats num">
-        <div><span>این اجرا</span><b className={tone(ret(last?.equity))}>{pct(ret(last?.equity))}</b></div>
-        <div><span>نگهداری تتر</span><b className={tone(ret(last?.hold_usdt))}>{pct(ret(last?.hold_usdt))}</b></div>
-        <div><span>تا پایان چالش</span><b>{end ? countdown(end - now) : "تنظیم نشده"}</b></div>
-      </div>
-
-      {d.curve?.length > 1 ? <Curve rows={d.curve} />
-        : <div className="muted empty-line">نمودار ارزش با ثبت‌های ۵ دقیقه‌ای ساخته می‌شود.</div>}
-
-      <div className="eng-regime">
-        <span className="muted">دروازه خرید ماهواره: </span>
-        <b className={e.regime === "risk_off" ? "down" : "up"}>{e.regime === "risk_off" ? "بسته" : "باز"}</b>
-        <span className="muted"> ({REGIME_FA[e.regime] ?? e.regime ?? "—"})</span>
-        {e.regime_reason && <div className="muted clamp">{e.regime_reason}</div>}
-      </div>
-
-      {usdtMode && end && <ExitPlan end={end} now={now} p={p} done={core?.slices_done ?? 0} />}
-
-      <div className="rules">
-        {p.max_exposure_pct != null && <span>سقف ماهواره {Math.round(p.max_exposure_pct * 100)}٪</span>}
-        {p.risk_per_trade_pct != null && <span>ریسک هر معامله {p.risk_per_trade_pct * 100}٪</span>}
-        {p.max_positions != null && <span>حداکثر {p.max_positions} پوزیشن</span>}
-        {p.core_guard_pct != null && usdtMode && <span>محافظ تتر −{Math.round(p.core_guard_pct * 100)}٪</span>}
-        {p.drawdown_pause_pct != null && <span>توقف خرید در افت {Math.round(p.drawdown_pause_pct * 100)}٪</span>}
-        {p.drawdown_stop_pct != null && <span>تسویه کامل در افت {Math.round(p.drawdown_stop_pct * 100)}٪</span>}
-      </div>
-    </>
-  );
-}
-
-function countdown(ms: number): string {
-  if (ms <= 0) return "پایان یافت";
-  const h = Math.floor(ms / 3.6e6), m = Math.floor((ms % 3.6e6) / 6e4);
-  return h >= 24 ? `${Math.floor(h / 24)} روز و ${h % 24} ساعت` : `${h}:${String(m).padStart(2, "0")}`;
-}
-
-function hhmm(t: number): string {
-  return new Date(t).toLocaleString("fa-IR", { weekday: "short", hour: "2-digit", minute: "2-digit" });
-}
-
-/** The end-of-challenge schedule, mirroring engine/allocator.py: slice deadlines spaced evenly from the window's
- *  start to the final flatten; the AI may sell each slice earlier. */
-function ExitPlan({ end, now, p, done }: { end: number; now: number; p: any; done: number }) {
-  const n = p.core_exit_slices ?? 3, hours = p.core_exit_hours ?? 6, flat = p.flatten_before_end_min ?? 45;
-  const opens = end - hours * 3.6e6, last = end - flat * 6e4;
-  const rows = [
-    { t: end - (p.no_entry_before_end_min ?? 240) * 6e4, l: "آخرین خرید ماهواره" },
-    { t: opens, l: "شروع پنجره خروج (AI زمان هر بخش را انتخاب می‌کند)" },
-    ...Array.from({ length: n }, (_, i) => ({ t: last - (n - 1 - i) * (last - opens) / n, l: `مهلت فروش بخش ${i + 1} از ${n} تتر`, slice: i + 1 })),
-  ].sort((a, b) => a.t - b.t);
-  return (
-    <div className="eng-sec">
-      <div className="eng-sec-h">برنامه پایان چالش</div>
-      {rows.map((r, i) => {
-        const ok = (r as any).slice ? (r as any).slice <= done : now >= r.t;
-        return (
-          <div className="eng-row" key={i}>
-            <span className={ok ? "up" : "muted"}>{ok ? "✓" : "○"}</span>
-            <span>{r.l}</span>
-            <span className="spacer" />
-            <span className="muted num">{hhmm(r.t)}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-/** Equity vs hold-USDT (amber) vs hold-TMN (dashed reference), with a crosshair tooltip. */
-function Curve({ rows }: { rows: any[] }) {
-  const [hover, setHover] = useState<number | null>(null);
-  const W = 320, H = 120, pad = { l: 4, r: 4, t: 8, b: 8 };
-  const geo = useMemo(() => {
-    const vals = rows.flatMap((r) => [r.equity, r.hold_usdt, r.hold_tmn].filter((v) => v != null));
-    // at least +-1% around the start, so fees and noise don't look like a crash
-    const base = rows[0].equity;
-    let lo = Math.min(...vals, base * 0.99), hi = Math.max(...vals, base * 1.01);
-    const t0 = rows[0].t, t1 = rows[rows.length - 1].t || t0 + 1;
-    const x = (t: number) => pad.l + ((t - t0) / Math.max(1, t1 - t0)) * (W - pad.l - pad.r);
-    const y = (v: number) => pad.t + (1 - (v - lo) / (hi - lo)) * (H - pad.t - pad.b);
-    const path = (k: string) => rows.filter((r) => r[k] != null).map((r, i) => `${i ? "L" : "M"}${x(r.t).toFixed(1)},${y(r[k]).toFixed(1)}`).join("");
-    const lab = (v: number) => pct((100 * (v - base)) / base, 1);
-    return { x, y, eq: path("equity"), usdt: path("hold_usdt"), tmn: path("hold_tmn"), top: lab(hi), bottom: lab(lo) };
-  }, [rows]);
-  const h = hover != null ? rows[hover] : null;
-  const move = (ev: React.PointerEvent<SVGSVGElement>) => {
-    const r = ev.currentTarget.getBoundingClientRect();
-    const fx = ((ev.clientX - r.left) / r.width) * W;
-    let best = 0;
-    rows.forEach((row, i) => { if (Math.abs(geo.x(row.t) - fx) < Math.abs(geo.x(rows[best].t) - fx)) best = i; });
-    setHover(best);
-  };
-  return (
-    <figure className="curve">
-      <div className="curve-legend">
-        <span><i className="ln ln-eq" />ارزش حساب</span>
-        <span><i className="ln ln-usdt" />نگهداری تتر</span>
-        <span><i className="ln ln-tmn" />نگهداری تومان</span>
-      </div>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" onPointerMove={move} onPointerLeave={() => setHover(null)}
-           role="img" aria-label="ارزش حساب در برابر نگهداری تتر و تومان">
-        <path d={geo.tmn} className="ln-tmn" vectorEffect="non-scaling-stroke" />
-        <path d={geo.usdt} className="ln-usdt" vectorEffect="non-scaling-stroke" />
-        <path d={geo.eq} className="ln-eq" vectorEffect="non-scaling-stroke" />
-        {h && <line x1={geo.x(h.t)} x2={geo.x(h.t)} y1={0} y2={H} className="xhair" vectorEffect="non-scaling-stroke" />}
-      </svg>
-      <span className="curve-y top num">{geo.top}</span>
-      <span className="curve-y bottom num">{geo.bottom}</span>
-      {h && (
-        <div className="curve-tip num">
-          <div className="muted">{hhmm(h.t * 1000)}</div>
-          <div>حساب <b>{compact(h.equity)}</b></div>
-          {h.hold_usdt != null && <div>تتر <b>{compact(h.hold_usdt)}</b></div>}
-        </div>
-      )}
-    </figure>
-  );
-}
-
-const EVIDENCE: [string, string, "keep" | "drop" | "small"][] = [
-  ["نگهداری تتر (کاهش ارزش تومان)", "۱۸۰ روز ‎+78%‎؛ پنجره‌های ۷۲ ساعته ۶۵٪ مثبت، بیشترین افت ۶٫۶٪", "keep"],
-  ["زمان‌بندی تتر/تومان (۱۲ قانون)", "همه بدتر از نگهداری ساده، داخل و خارج نمونه", "drop"],
-  ["چرخش تتر ↔ بیت‌کوین/اتریوم", "‎−8%‎ تا ‎−47%‎ به خاطر کارمزد و نوسان", "drop"],
-  ["آربیتراژ مثلثی", "۰ از ۱۹۲ نمونه زنده سودده بعد از کارمزد", "drop"],
-  ["خرید افت در بازارهای تومانی", "۲۱ روز: ‎−3.03%‎، ۱۷ معامله، نرخ برد ۲۹٪", "drop"],
-  ["خرید افت در بازارهای تتری", "۲۱ روز: ‎+0.23%‎، ۵ معامله، نرخ برد ۶۰٪ (کارمزد ۰٫۲۶٪)", "small"],
-  ["دروازه فراگیری بازار", "سیگنال‌های مسدودشده به‌طور میانگین ‎−1.1%‎ تا ‎−1.7%‎ ضرر داشتند", "keep"],
-];
-const VERDICT_FA = { keep: "هسته", drop: "حذف", small: "ماهواره کوچک" };
-
-function Evidence() {
-  return (
-    <>
-      <div className="muted" style={{ fontSize: 12 }}>هر جزء استراتژی با داده واقعی والکس و کارمزد واقعی حساب آزموده شد (اسکریپت‌ها در مخزن).</div>
-      <table className="evidence">
-        <thead><tr><th>ایده</th><th>نتیجه</th><th>تصمیم</th></tr></thead>
-        <tbody>
-          {EVIDENCE.map(([idea, res, v]) => (
-            <tr key={idea}><td>{idea}</td><td className="muted">{res}</td><td><span className={`verdict ${v}`}>{VERDICT_FA[v]}</span></td></tr>
-          ))}
-        </tbody>
-      </table>
-    </>
   );
 }
