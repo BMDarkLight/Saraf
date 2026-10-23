@@ -1,0 +1,53 @@
+# Read-only health check of the deployed engine, run on the VPS's self-hosted runner (the VPS reaches the Wallex API;
+# most other networks can't reach the VPS). Prints the engine's journal, state and market facts into the job log and,
+# optionally, runs a backtest in the runner's own checkout (never in /opt/wallex-agent/data). Changes nothing.
+name: Status
+
+on:
+  workflow_dispatch:
+    inputs:
+      events:
+        description: newest journal events to print per run
+        default: "60"
+      backtest:
+        description: optional backtest args, e.g. "--days 7 --decider rules" (empty = no backtest)
+        default: ""
+      profile:
+        description: env file loaded before the backtest (e.g. deploy/strategy.env); empty = defaults
+        default: "deploy/strategy.env"
+
+concurrency:
+  group: status-vps
+  cancel-in-progress: false
+
+jobs:
+  status:
+    runs-on: [self-hosted, wallex-vps]
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false   # keeps the backtest's candle cache (data/ is git-ignored) between runs
+      - name: Services
+        run: |
+          systemctl is-active wallex-engine wallex-web wallex-strategy || true
+          journalctl -u wallex-engine --no-pager -n 40 --since "-6h" | grep -v '"event": "mark"' | tail -40 || true
+      - name: Engine report
+        working-directory: /opt/wallex-agent/backend
+        env:
+          EVENTS: ${{ inputs.events }}
+        run: |
+          set -a; [ -f ../deploy/challenge.env ] && . ../deploy/challenge.env; set +a
+          /root/.local/bin/uv run --no-dev python "$GITHUB_WORKSPACE/backend/scripts/status.py" --events "$EVENTS"
+      - name: Backtest
+        if: ${{ inputs.backtest != '' }}
+        working-directory: backend
+        env:
+          ARGS: ${{ inputs.backtest }}
+          PROFILE: ${{ inputs.profile }}
+        run: |
+          /root/.local/bin/uv sync --frozen
+          set -a; [ -n "$PROFILE" ] && . "../$PROFILE"; set +a
+          # no .env in the checkout: public market data only, rules decider unless asked otherwise
+          /root/.local/bin/uv run python -m wallex_agent.engine backtest $ARGS
+          for d in $(ls -td ../data/backtests/*/ | head -2); do echo "== $d"; head -45 "$d/report.md"; done
