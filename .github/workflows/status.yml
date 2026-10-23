@@ -43,6 +43,9 @@ jobs:
             echo "== $u"; journalctl -u "$u" --no-pager -n 15 || true
           done
           journalctl -u wallex-engine --no-pager -n 40 --since "-6h" | grep -v '"event": "mark"' | tail -40 || true
+          echo "== wallex-traders"; journalctl -u wallex-traders --no-pager -n 25 || true
+          cat /opt/wallex-agent/data/engine/traders/selection.json 2>/dev/null | head -c 1500 || true; echo
+          ls -la /opt/wallex-agent/data/engine | grep trader || true
       - name: Web endpoints
         run: |
           for u in /api/strategy/tuning /api/personas /api/strategy; do
