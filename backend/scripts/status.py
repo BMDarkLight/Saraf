@@ -135,6 +135,28 @@ async def market_facts() -> None:
         await c.aclose()
 
 
+def summary(eng: Path) -> None:
+    """A short block at the end of the log: what each check reads first."""
+    print("\n================ SUMMARY ================")
+    for d in sorted(eng.iterdir()) if eng.exists() else []:
+        if not (d.is_dir() and (d / "equity.csv").exists()) or d.name == "shadow":
+            continue
+        rows = (d / "equity.csv").read_text().strip().splitlines()[1:]
+        last = rows[-1].split(",") if rows else None
+        hour = rows[-13].split(",") if len(rows) >= 13 else (rows[0].split(",") if rows else None)
+        n_tr = max(0, len((d / "trades.csv").read_text().strip().splitlines()) - 1) if (d / "trades.csv").exists() else 0
+        evs = [json.loads(l) for l in tail_lines(d / "decisions.jsonl", 400_000) if l.strip().startswith("{")] \
+            if (d / "decisions.jsonl").exists() else []
+        recent = [e for e in evs if e["ts"] > time.time() - 3600 and e["event"] not in ("start",)]
+        state = json.loads((d / "state.json").read_text()) if (d / "state.json").exists() else {}
+        if last:
+            eq = float(last[1])
+            print(f"{d.name:<20} equity {eq:>12,.0f} ({100 * (eq / 5_000_000 - 1):+.2f}%) 1h {float(last[1]) - float(hour[1]):+,.0f} "
+                  f"dd {last[4]}% trades {n_tr} open {len(state.get('positions', {}))} pending {len(state.get('pending', {}))} "
+                  f"regime {state.get('regime')} core {(state.get('core') or {}).get('status')} "
+                  f"last-hour {dict(Counter(e['event'] for e in recent))}")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--events", type=int, default=60)
@@ -152,6 +174,7 @@ def main() -> None:
         asyncio.run(market_facts())
     except Exception as e:
         print("market facts unavailable:", type(e).__name__, e)
+    summary(eng)
 
 
 if __name__ == "__main__":
