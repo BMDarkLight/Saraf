@@ -108,14 +108,14 @@ export default function App() {
           <span>والکس <small>ایجنت</small></span>
         </div>
         <nav className="seg view-switch" aria-label="بخش">
-          <button className={tab !== "strategy" ? "on" : ""} onClick={() => setTab("chat")}>معامله</button>
+          <button className={tab === "chat" || tab === "trade" ? "on" : ""} onClick={() => setTab("chat")}>معامله</button>
+          <button className={tab === "markets" ? "on" : ""} onClick={() => setTab("markets")}>بازار</button>
           <button className={tab === "strategy" ? "on" : ""} onClick={() => setTab("strategy")}>استراتژی</button>
         </nav>
         <span className="spacer" />
         {cfg && (
           <>
             <ModeChip live={cfg.engine_mode === "live"} onChanged={reloadCfg} />
-            <span className="chip hide-sm ltr">{cfg.model}</span>
           </>
         )}
         <button className="icon-btn" aria-label="تغییر تم" onClick={() => setTheme(dark ? "light" : "dark")}>
@@ -131,36 +131,39 @@ export default function App() {
           کلید LLM تنظیم نشده — LLM_API_KEY و LLM_BASE_URL را در فایل ‎.env‎ قرار دهید.
         </div>
       )}
-      {tab === "strategy" ? (
+      {tab === "strategy" && (
         <main className="spage-wrap">
           <StrategyPage onModeChanged={reloadCfg} tab={sTab} setTab={setSTab} />
         </main>
-      ) : (
-      <main className="layout">
-        <div className="seg side-switch" role="tablist" aria-label="پنل کناری">
-          <button className={tab === "markets" ? "on" : ""} onClick={() => setTab("markets")}>بازارها</button>
-          <button className={tab !== "markets" ? "on" : ""} onClick={() => setTab("trade")}>پورتفو و عمق بازار</button>
-        </div>
-        <section className={`col markets-col ${tab === "markets" ? "active side-on" : ""}`}>
-          {/* on phones the chart sits under the list: bring it into view on a pick */}
+      )}
+      {/* both views stay mounted (a reply streaming in the chat survives a look at the market); one is hidden */}
+      {/* market view: everything about prices - the list, the candles and indicators, depth and sentiment */}
+      <main className="layout market-view" hidden={tab !== "markets"}>
+        <section className="col markets-col active">
           <Markets selected={symbol} onSelect={(s) => {
             setSymbol(s);
-            if (matchMedia("(max-width: 820px)").matches)
+            if (matchMedia("(max-width: 820px)").matches)   // on phones the chart sits under the list
               setTimeout(() => document.querySelector(".chart-card")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
           }} />
+        </section>
+        <section className="col chart-col active">
           <PriceChart symbol={symbol} theme={String(dark)} />
         </section>
-        <section className={`col chat-col ${tab === "chat" ? "active" : ""}`}>
-          <Chat ref={chat} onTrade={() => setRefresh((x) => x + 1)} onSymbol={setSymbol} />
-        </section>
-        <section className={`col side-left ${tab === "trade" ? "active" : ""} ${tab !== "markets" ? "side-on" : ""}`}>
-          <Strategy onOpen={openStrategy} />
-          <Portfolio refreshKey={refresh} onAsk={ask} assistantLive={cfg?.spot_mode === "live"} onModeChanged={reloadCfg} />
+        <section className="col depth-col active">
           <OrderBook symbol={symbol} />
           <FearGreed />
         </section>
       </main>
-      )}
+      {/* trade view: the assistant, with the strategy summary and the portfolio beside it */}
+      <main className="layout trade-view" hidden={tab !== "chat" && tab !== "trade"}>
+        <section className={`col chat-col ${tab === "chat" ? "active" : ""}`}>
+          <Chat ref={chat} onTrade={() => setRefresh((x) => x + 1)} onSymbol={setSymbol} />
+        </section>
+        <section className={`col side-left ${tab === "trade" ? "active" : ""}`}>
+          <Strategy onOpen={openStrategy} />
+          <Portfolio refreshKey={refresh} onAsk={ask} assistantLive={cfg?.spot_mode === "live"} onModeChanged={reloadCfg} />
+        </section>
+      </main>
       <AlertToasts onAsk={ask} />
       <nav className="mobile-tabs">
         {([["markets", "بازار"], ["chat", "ایجنت"], ["trade", "پورتفو"], ["strategy", "استراتژی"]] as const).map(([k, l]) => (
