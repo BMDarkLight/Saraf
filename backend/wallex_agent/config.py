@@ -111,6 +111,9 @@ class Settings(BaseSettings):
     engine_core_exit_slices: int = 3                    # USDT -> TMN in this many AI-timed slices
     engine_core_fee_rate: float = 0.003                 # taker fee on USDTTMN (TMN market) for backtests
     engine_monitor_seconds: int = 15
+    # At the challenge end also sell coins the engine doesn't manage (bought by hand or through the chat assistant):
+    # the challenge counts realized TMN, so nothing may be left in coins
+    engine_final_sweep: bool = True
 
     # News / web
     tavily_api_key: str = ""

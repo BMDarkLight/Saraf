@@ -267,7 +267,7 @@ async def portfolio():
     return out
 
 
-ENGINE_EVENTS = {"core", "core_decision", "regime", "decision", "risk_block", "entry_order", "entry", "entry_cancelled", "exit", "review",
+ENGINE_EVENTS = {"sweep", "core", "core_decision", "regime", "decision", "risk_block", "entry_order", "entry", "entry_cancelled", "exit", "review",
                  "circuit_breaker", "error", "start", "stop"}
 
 

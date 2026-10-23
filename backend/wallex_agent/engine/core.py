@@ -370,7 +370,9 @@ class Engine:
                                                             f"{self.s.engine_pause_hours:g}h", equity=eq)
         if self.end_ts and now >= self.end_ts - self.s.engine_flatten_before_end_min * 60 and not self.state["flattened"]:
             await self.flatten(now, "challenge_end")
-            if self.core is None or await self.core.final_exit(now):   # satellite first, then the USDT core
+            swept = await self.sweep_unmanaged(now)   # coins sold on a USDT market land in USDT: the core sells it next
+            core_done = self.core is None or await self.core.final_exit(now)   # never held back by a failing sweep
+            if swept and core_done:
                 self.state["flattened"] = True
             self.save()
             return
@@ -414,6 +416,35 @@ class Engine:
                 await self._open_position(o, st.filled_qty, st.price, st.tmn, now)
         for pid in list(self.positions):
             await self._exit(pid, reason, now)
+
+    async def sweep_unmanaged(self, now: float) -> bool:
+        """Challenge end: sell every other coin with a market (bought by hand or through the chat assistant on the same
+        account) to TMN, or to USDT where only a USDT market exists (the core then sells that USDT). True once nothing
+        sellable is left. Only free balances: coins locked in someone's resting order are left alone."""
+        if not self.s.engine_final_sweep:
+            return True
+        done = True
+        for asset, (free, _) in (await self.broker.wallet()).items():
+            if asset == "TMN" or free <= 0 or (asset == "USDT" and self.core):
+                continue
+            for symbol in (f"{asset}TMN", f"{asset}USDT"):
+                try:
+                    bid = (await self.feed.quote(symbol))["bid"]
+                    floor = await self.feed.min_notional(symbol)
+                except Exception:   # no such market
+                    continue
+                if not bid or free * bid < floor:
+                    break           # dust: nothing an order could sell
+                try:
+                    fill = await self.broker.sell(symbol, free, asset)
+                except Exception as e:
+                    self.journal.log("error", now, symbol=symbol, error=f"final sweep sell failed: {e}")
+                    done = False
+                    break
+                self.journal.log("sweep", now, symbol=symbol, qty=fill.qty, price=fill.price, proceeds=fill.tmn,
+                                 reason="challenge end: a coin the engine did not buy is sold so the result is in TMN")
+                break
+        return done
 
     async def _exit(self, pid: str, reason: str, now: float, hint: float | None = None, note: str | None = None) -> None:
         """Market exit. A resting take-profit is cancelled first (it may have filled meanwhile)."""

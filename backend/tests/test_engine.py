@@ -441,3 +441,20 @@ async def test_breadth_is_measured_on_the_satellites_own_quote(tmp_path):
     finally:
         feeds.global_fear_greed = real
     assert usdt["breadth_pct_up_24h"] == 0 and tmn["breadth_pct_up_24h"] == 100
+
+
+async def test_challenge_end_also_sells_coins_the_engine_did_not_buy(tmp_path):
+    """Live, 2026-10-23: ~80% of the account sat in USOON bought outside the engine; the end-of-challenge flatten only
+    sold the engine's own positions and the USDT core, so that part would never be realized in TMN."""
+    end_ts = T0 + 3 * 86_400
+    m1 = {"AAAUSDT": synth(start=1.0), "OILTMN": synth(seed=5, start=40_000_000.0), "USDTTMN": line(270_000, 271_000)}
+    feed = SimFeed(m1, {k: hourly(v) for k, v in m1.items()}, 15, {k: 0.002 for k in m1})
+    s = make_settings(tmp_path, engine_quote="USDT", engine_end_time=end_iso(end_ts), engine_fee_rate=0.0013)
+    broker = SimExec(feed, 1_000_000, s.engine_fee_rate, quote="USDT", tmn_fee_rate=0.003)
+    broker.holdings["OIL"] = 0.1                                   # ~4M TMN bought by hand
+    engine = Engine(s, feed, broker, CoreDecider(action="SKIP"), Journal(tmp_path / "run"))
+    await run(engine, feed, end_ts - 3600, end_ts)
+    assert engine.state["flattened"] and broker.holdings["OIL"] < 1e-9
+    assert broker.cash_by["TMN"] > 4_500_000 and broker.cash_by["USDT"] * 271_000 < 50_000
+    events = [json.loads(l) for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines()]
+    assert any(e["event"] == "sweep" and e["symbol"] == "OILTMN" for e in events)
