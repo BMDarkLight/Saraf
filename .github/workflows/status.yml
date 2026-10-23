@@ -31,6 +31,8 @@ jobs:
       - name: Services
         run: |
           systemctl is-active wallex-engine wallex-web wallex-strategy || true
+          free -m; nproc; uptime
+          systemctl list-units --no-pager --plain 'wallex-*' | head -20 || true
           journalctl -u wallex-engine --no-pager -n 40 --since "-6h" | grep -v '"event": "mark"' | tail -40 || true
       - name: Engine report
         working-directory: /opt/wallex-agent/backend
