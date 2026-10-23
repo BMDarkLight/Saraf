@@ -266,3 +266,21 @@ def test_undo_reverts_only_what_that_message_changed(srv, monkeypatch):
     assert c.post(f"/api/strategy/chats/{sid}/undo", json={"index": 1}).status_code == 400   # already undone
     assert c.post(f"/api/strategy/chats/{sid}/undo", json={"index": 3}).json()["ok"]
     assert tuning.read_env(srv.eng / "tuning.env") == {"engine_max_positions": 2, "engine_breadth_gate_pct": 30.0}
+
+
+def test_live_traders_are_listed_added_and_removed(srv, monkeypatch):
+    from wallex_agent import traders
+    monkeypatch.setattr(srv.server.traders_mod, "DIR", srv.eng / "traders")
+    c = srv.c
+    assert c.post("/api/traders", json={"address": "nope"}).status_code == 400
+    addr = "0x" + "ab" * 20
+    assert c.post("/api/traders", json={"address": addr.upper().replace("0X", "0x"), "name": "Famous"}).json()["ok"]
+    run = srv.eng / traders.run_name(addr)
+    run.mkdir()
+    (run / "equity.csv").write_text("time,equity_tmn,cash_tmn,exposure_tmn,drawdown_pct\n100,5000000,0,0,0\n200,5050000,0,0,0\n")
+    (run / "trader.json").write_text(json.dumps({"account_usd": 2e6, "positions": [{"coin": "BTC", "side": "long",
+                                                 "usd": 1e6, "size": 10, "entry": 1, "upnl": 0}], "board": {"pnl_month": 5}}))
+    r = c.get("/api/personas").json()["traders"]
+    assert len(r) == 1 and r[0]["name"] == "Famous" and r[0]["source"] == "pinned" and r[0]["return_pct"] == 1.0
+    assert r[0]["positions"][0]["coin"] == "BTC" and r[0]["account_usd"] == 2e6
+    assert c.delete(f"/api/traders/{addr}").json()["ok"] and c.get("/api/traders").json()["traders"] == []

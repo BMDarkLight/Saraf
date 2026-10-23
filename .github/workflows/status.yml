@@ -36,7 +36,7 @@ jobs:
           clean: false   # keeps the backtest's candle cache (data/ is git-ignored) between runs
       - name: Services
         run: |
-          systemctl is-active wallex-engine wallex-web wallex-strategy || true
+          systemctl is-active wallex-engine wallex-web wallex-strategy wallex-traders || true
           free -m; nproc; uptime
           systemctl list-units --no-pager --plain 'wallex-*' | head -20 || true
           for u in $(systemctl list-units --no-pager --plain --no-legend --state=failed,activating 'wallex-*' | awk '{print $1}'); do

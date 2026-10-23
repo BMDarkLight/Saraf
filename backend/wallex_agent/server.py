@@ -27,7 +27,7 @@ from .brokers import BrokerError, LiveSpotBroker, PaperFuturesBroker, PaperSpotB
 from .config import ROOT, get_settings
 from .market import analytics, sentiment
 from .news import web
-from . import personas as persona_mod, strategy_chat, tuning
+from . import personas as persona_mod, strategy_chat, traders as traders_mod, tuning
 from .wallex import WallexError
 
 settings = get_settings()
@@ -702,9 +702,18 @@ def _write_tuning(values: dict) -> None:
 
 def _persona_record(p: dict) -> dict:
     """A persona's public profile plus its track record from its own shadow journal."""
-    d = ROOT / "data" / "engine" / persona_mod.run_name(p)
     rec = {k: p[k] for k in ("id", "name", "handle", "tagline", "bio", "glyph", "hue", "risk", "style", "preset")}
     rec["run"] = persona_mod.run_name(p)
+    rec.update(_track_record(ROOT / "data" / "engine" / rec["run"]))
+    bt = ROOT / "results" / "personas" / f"{p['id']}.json"
+    with contextlib.suppress(OSError, ValueError):
+        rec["backtest"] = json.loads(bt.read_text())
+    return rec
+
+
+def _track_record(d: Path) -> dict:
+    """A shadow session's results from its journal directory: equity curve, return, drawdown, trades."""
+    rec: dict = {}
     rows = []
     with contextlib.suppress(OSError):
         rows = [r.split(",") for r in (d / "equity.csv").read_text().strip().splitlines()[1:]]
@@ -740,16 +749,76 @@ def _persona_record(p: dict) -> dict:
         "recent_trades": [{k: t.get(k) for k in ("symbol", "setup", "exit_time", "pnl_pct", "exit_reason")}
                           for t in reversed(trades[-6:])],
     })
-    bt = ROOT / "results" / "personas" / f"{p['id']}.json"
-    with contextlib.suppress(OSError, ValueError):
-        rec["backtest"] = json.loads(bt.read_text())
     return rec
+
+
+def _trader_record(t: dict) -> dict:
+    """A followed real trader: their public Hyperliquid profile (trader.json, written by the follower) and our
+    simulated copy's track record."""
+    run = traders_mod.run_name(t["address"])
+    d = ROOT / "data" / "engine" / run
+    prof = {}
+    with contextlib.suppress(OSError, ValueError):
+        prof = json.loads((d / "trader.json").read_text())
+    addr = t["address"]
+    events = []
+    with contextlib.suppress(OSError):
+        with (d / "decisions.jsonl").open("rb") as f:   # the tail: what the trader did and what the copy did
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 60_000))
+            for line in reversed(f.read().decode(errors="ignore").splitlines()[1:]):
+                with contextlib.suppress(ValueError):
+                    e = json.loads(line)
+                    if e.get("event") in ("trader", "entry", "exit", "error"):
+                        events.append({k: e.get(k) for k in ("time", "event", "symbol", "coin", "action", "side", "usd",
+                                                              "copied", "reason", "error", "pnl_pct")})
+                if len(events) >= 15:
+                    break
+    return {"id": run, "address": addr, "name": t.get("name") or prof.get("name"), "source": t.get("source"),
+            "events": events,
+            "hue": int(addr[2:8], 16) % 360, "run": run, **_track_record(d),
+            **{k: prof.get(k) for k in ("account_usd", "positions", "fills", "board", "copy_weights", "not_copied",
+                                         "updated")}}
+
+
+@app.get("/api/traders")
+async def list_traders():
+    return {"traders": [_trader_record(t) for t in traders_mod.followed(traders_mod.DIR)]}
+
+
+class TraderIn(BaseModel):
+    address: str
+    name: str = ""
+
+
+@app.post("/api/traders")
+async def add_trader(body: TraderIn):
+    """Follow a trader by their Hyperliquid address (e.g. a well-known trader's public address); the follower service
+    picks it up within a minute."""
+    addr = body.address.strip().lower()
+    if not traders_mod.ADDRESS.match(addr):
+        raise HTTPException(400, "not a Hyperliquid (0x...) address")
+    pinned = traders_mod.load_json(traders_mod.DIR / "pinned.json", [])
+    pinned = [p for p in pinned if p.get("address", "").lower() != addr]
+    if len(pinned) >= 8:
+        raise HTTPException(400, "at most 8 added traders")
+    pinned.insert(0, {"address": addr, "name": body.name.strip()[:40] or None, "added": time.time()})
+    traders_mod.save_json(traders_mod.DIR / "pinned.json", pinned)
+    return {"ok": True}
+
+
+@app.delete("/api/traders/{address}")
+async def remove_trader(address: str):
+    pinned = traders_mod.load_json(traders_mod.DIR / "pinned.json", [])
+    traders_mod.save_json(traders_mod.DIR / "pinned.json", [p for p in pinned if p.get("address", "").lower() != address.lower()])
+    return {"ok": True}
 
 
 @app.get("/api/personas")
 async def list_personas():
     return {"personas": [_persona_record(p) for p in persona_mod.PERSONAS], "copying": copying(),
-            "live": requested_engine_mode() == "live", "strategy_live": strategy_is_live()}
+            "live": requested_engine_mode() == "live", "strategy_live": strategy_is_live(),
+            "traders": [_trader_record(t) for t in traders_mod.followed(traders_mod.DIR)]}
 
 
 class CopyIn(BaseModel):

@@ -1,0 +1,17 @@
+[Unit]
+Description=Wallex live trader personas: follow real Hyperliquid traders, simulated copy (wallex_agent/traders.py)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/wallex-agent/backend
+EnvironmentFile=/opt/wallex-agent/.env
+Environment=PYTHONUNBUFFERED=1 TZ=UTC
+# shadow only: reads public positions, simulates the copy at live Wallex prices, never places orders
+ExecStart=/root/.local/bin/uv run --no-dev python -m wallex_agent.traders run
+Restart=always
+RestartSec=30
+MemoryMax=400M
+
+[Install]
+WantedBy=multi-user.target

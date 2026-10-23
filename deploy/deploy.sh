@@ -33,10 +33,11 @@ if [ -f "$APP/data/engine/profile.env" ]; then
 fi
 
 install -m 644 "$APP"/deploy/wallex-engine.service "$APP"/deploy/wallex-web.service \
-  "$APP"/deploy/wallex-strategy.service "$APP"/deploy/wallex-persona@.service /etc/systemd/system/
+  "$APP"/deploy/wallex-strategy.service "$APP"/deploy/wallex-persona@.service \
+  "$APP"/deploy/wallex-traders.service /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --quiet wallex-engine wallex-web wallex-strategy
-systemctl restart wallex-web wallex-engine wallex-strategy
+systemctl enable --quiet wallex-engine wallex-web wallex-strategy wallex-traders
+systemctl restart wallex-web wallex-engine wallex-strategy wallex-traders
 
 # copy-trading personas: one shadow session each (wallex_agent/personas.py lists them)
 PERSONAS=$(cd "$APP/backend" && "$UV" run --no-dev python -m wallex_agent.personas)

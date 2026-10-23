@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getJSON } from "../../api";
 import { pct, tone } from "../../format";
 import { ConfirmDialog, fmtParam, hhmm, pctOrDash, postJSON, REASON_FA, SETUP_FA, Sparkline, Stat } from "./common";
+import { TraderCards, TraderProfile } from "./Traders";
 
 const RISK_FA = ["", "خیلی کم", "کم", "متوسط", "زیاد", "خیلی زیاد"];
 
@@ -46,9 +47,13 @@ export function Personas({ onApplied, params }: { onApplied: () => void; params:
   if (!d) return <div className="muted">در حال بارگذاری…</div>;
   const sel = d.personas.find((p: any) => p.id === open);
   if (sel) return <Profile p={sel} d={d} params={params} onBack={() => setOpen(null)} onApplied={() => { load(); onApplied(); }} />;
+  const trader = (d.traders ?? []).find((t: any) => t.id === open);
+  if (trader) return <TraderProfile t={trader} onBack={() => setOpen(null)} onChanged={load} />;
 
   return (
     <div className="personas">
+      <TraderCards traders={d.traders ?? []} onOpen={setOpen} onChanged={load} />
+      <div className="sec-h"><h4>پرسوناهای استراتژی</h4></div>
       <p className="muted">هر پرسونا یک نسخه از استراتژی با تنظیمات خودش است که روی سرور به‌صورت شبیه‌سازی (داده واقعی والکس، بدون
         سفارش واقعی) اجرا می‌شود؛ کارنامه‌ای که می‌بینید همان اجراست. با «کپی» موتور اصلی تنظیمات آن پرسونا را می‌گیرد.</p>
       {d.copying && (

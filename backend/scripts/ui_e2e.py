@@ -154,7 +154,7 @@ async def desktop(pg: Page) -> None:
 
     # --- copy-trading keeps the person's end time
     await pg.click(".stabs >> text=کپی‌تریدینگ")
-    await pg.locator(".p-card").nth(4).click()                  # cautious
+    await pg.locator(".p-card:not(.trader)").nth(4).click()     # cautious (the live trader cards come first)
     await pg.click("text=کپی این پرسونا")
     await confirm(pg)
     e = env()
@@ -163,6 +163,28 @@ async def desktop(pg: Page) -> None:
     await pg.click("text=توقف کپی")
     await confirm(pg)
     ok(env() == {"ENGINE_END_TIME": "2026-10-26T18:30:00Z"}, "stopping the copy keeps only the end time")
+
+    # --- live trader personas: listed, profile opens, a trader added by address is followed
+    await pg.click("text=→ همه پرسوناها")
+    await pg.wait_for_selector(".p-card.trader")
+    ok(await pg.locator(".p-card.trader").count() >= 1, "live trader cards are listed above the personas")
+    await pg.locator(".p-card.trader").first.click()
+    await pg.wait_for_selector(".pos-table")
+    ok(await pg.locator(".live-chip").count() >= 1, "trader profile shows live positions")
+    await pg.click("text=→ همه")
+    await pg.click("text=+ افزودن تریدر")
+    addr = "0x" + "ab" * 20
+    await pg.fill(".add-trader input.ltr", addr)
+    await pg.fill(".add-trader input:not(.ltr)", "Famous Trader")
+    await pg.click(".add-trader >> text=دنبال کردن")
+    await pg.wait_for_timeout(600)
+    pinned = json.loads((ENG / "traders" / "pinned.json").read_text())
+    ok(pinned[0]["address"] == addr and pinned[0]["name"] == "Famous Trader", "a trader added by address is saved")
+    ok(await pg.locator(".p-card.trader >> text=Famous Trader").count() == 1, "the added trader appears in the list")
+    await pg.locator(".p-card.trader >> text=Famous Trader").click()
+    await pg.click("text=حذف از فهرست")
+    await pg.wait_for_timeout(600)
+    ok(json.loads((ENG / "traders" / "pinned.json").read_text()) == [], "the added trader can be removed")
 
     # --- move a coin bought outside the engine into the core
     await view(pg, "معامله")
@@ -188,7 +210,7 @@ async def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--chromium", default="/opt/pw-browsers/chromium-1194/chrome-linux/chrome")
     args = ap.parse_args()
-    for f in ("tuning.env", "control.json", "copy.json"):
+    for f in ("tuning.env", "control.json", "copy.json", "traders/pinned.json"):
         (ENG / f).unlink(missing_ok=True)
     async with async_playwright() as p:
         b = await p.chromium.launch(executable_path=args.chromium)

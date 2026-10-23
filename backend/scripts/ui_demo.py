@@ -120,6 +120,37 @@ def write_journals(root: Path) -> None:
     for i, p in enumerate(PERSONAS):
         run(run_name(p), [0.00003, 0.000035, -0.00001, -0.00002, 0.00002][i], 120 + 40 * i,
             [("XRPUSDT", 1.4, "take_profit"), ("DOGEUSDT", -0.9, "stop_loss")][: i % 3])
+    # live trader personas (wallex_agent/traders.py), shaped like the real Hyperliquid data seen 2026-10-23
+    from wallex_agent import traders
+    whales = [("0x5b5d51203a0f9079f8aeb098a6523a13f298c060", None, 261.6e6, (4.09e6, 18.1e6, 109e6, 173.8e6),
+               [("ETH", "short", 247e6), ("BTC", "short", 201e6), ("SOL", "short", 68e6), ("LINK", "short", 4.2e6)], 0.0),
+              ("0x7fdafde5cfb5465924316eced2d3715494c517d1", "BobbyBigSize", 48.3e6, (-90e3, 2.9e6, 20.3e6, 140.1e6),
+               [("BTC", "long", 22e6), ("kPEPE", "long", 3.1e6), ("HYPE", "long", 9e6)], 0.000025),
+              ("0xb83de012dba672c76a7dbbbf3e459cb59d7d6e36", None, 240.8e6, (3.1e6, 17.1e6, 99.3e6, 133.6e6),
+               [("SOL", "long", 40e6), ("ETH", "short", 30e6)], 0.000012)]
+    sel = []
+    for addr, name, acct, (d, w, m, a), book, drift in whales:
+        sel.append({"address": addr, "name": name, "account_usd": acct, "pnl_day": d, "pnl_week": w, "pnl_month": m,
+                    "pnl_allTime": a, "roi_month": m / acct})
+        run(traders.run_name(addr), drift, 60)
+        tdir = root / traders.run_name(addr)
+        positions = [{"coin": c, "side": sd, "size": u / 1000, "usd": u, "entry": 1.0, "upnl": u * 0.02 * (1 if sd == "short" else -0.5),
+                      "leverage": 10} for c, sd, u in book]
+        weights, skipped = traders.target_weights({"account_usd": acct, "positions": positions}, set(PRICES) | {"PEPEUSDT"})
+        (tdir / "trader.json").write_text(json.dumps({
+            "address": addr, "name": name, "account_usd": acct, "positions": positions, "copy_weights": weights,
+            "not_copied": skipped, "board": {"pnl_day": d, "pnl_week": w, "pnl_month": m, "pnl_allTime": a, "roi_month": m / acct},
+            "fills": [{"coin": c, "dir": f"Open {'Long' if sd == 'long' else 'Short'}", "time": now - 900 * (i + 1), "usd": u / 20,
+                       "closed_pnl": 0.0} for i, (c, sd, u) in enumerate(book)]
+                     + [{"coin": "BTC", "dir": "Close Long", "time": now - 7200, "usd": 3.2e6, "closed_pnl": 412_000.0}]}))
+        with (tdir / "decisions.jsonl").open("a") as f:
+            for i, (c, sd, u) in enumerate(book):
+                f.write(json.dumps({"ts": now - 600 * (i + 1), "time": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 600 * (i + 1))),
+                                    "event": "trader", "coin": c, "symbol": f"{c}USDT", "action": "opened", "side": sd,
+                                    "usd": u, "copied": sd == "long"}) + "\n")
+    tr = root / "traders"
+    tr.mkdir(exist_ok=True)
+    (tr / "selection.json").write_text(json.dumps({"at": now, "traders": sel}))
     (root / "mode.env").write_text("ENGINE_RUN_ARGS=--mode live --confirm-live\n")
     (root / "profile.env").write_text("ENGINE_QUOTE=USDT\n")
 
