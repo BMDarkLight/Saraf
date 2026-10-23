@@ -42,6 +42,10 @@ def test_every_persona_preset_is_valid_and_has_a_profile():
         ids.add(p["id"])
     assert len(ids) == len(personas.PERSONAS)
     assert "strategist" not in personas.session_ids() and "guardian" in personas.session_ids()
+    from wallex_agent.engine.runner import valid_run_name
+    # live, 2026-10-23: persona-dip_hunter was refused at startup (underscore) and its unit crash-looped
+    assert all(valid_run_name(personas.run_name(p)) for p in personas.PERSONAS)
+    assert not any(valid_run_name(n) for n in ("live", "shadow", "../x", "a/b", ""))
 
 
 @pytest.fixture

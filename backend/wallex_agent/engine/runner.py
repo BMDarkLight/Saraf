@@ -19,6 +19,11 @@ from .journal import Journal
 SECRET_FIELDS = {"llm_api_key", "engine_llm_api_key", "wallex_api_key", "tavily_api_key", "wallex_sub_account_client_id"}
 
 
+def valid_run_name(name: str) -> bool:
+    """A journal directory name under data/engine: no paths, and not one of the main engine's own runs."""
+    return name not in ("live", "shadow") and name.replace("-", "").replace("_", "").isalnum()
+
+
 def git_commit() -> str:
     if os.environ.get("GIT_COMMIT", "unknown") != "unknown":   # set at docker build time
         return os.environ["GIT_COMMIT"]
@@ -31,8 +36,8 @@ def git_commit() -> str:
 async def run_engine(s: Settings, mode: str, confirm_live: bool = False, max_loops: int | None = None,
                      hours: float | None = None, name: str | None = None) -> None:
     client = WallexClient(s.wallex_base_url, s.wallex_api_key, sub_account=s.wallex_sub_account_client_id)
-    if name and (name in ("live", "shadow") or not name.replace("-", "").isalnum()):
-        raise SystemExit("--name must be a plain name other than live/shadow")
+    if name and not valid_run_name(name):
+        raise SystemExit("--name must be a plain name (letters, digits, - and _) other than live/shadow")
     out = ROOT / "data" / "engine" / (name or mode)
     out.mkdir(parents=True, exist_ok=True)
     if mode == "live":

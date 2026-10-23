@@ -33,6 +33,9 @@ jobs:
           systemctl is-active wallex-engine wallex-web wallex-strategy || true
           free -m; nproc; uptime
           systemctl list-units --no-pager --plain 'wallex-*' | head -20 || true
+          for u in $(systemctl list-units --no-pager --plain --no-legend --state=failed,activating 'wallex-*' | awk '{print $1}'); do
+            echo "== $u"; journalctl -u "$u" --no-pager -n 15 || true
+          done
           journalctl -u wallex-engine --no-pager -n 40 --since "-6h" | grep -v '"event": "mark"' | tail -40 || true
       - name: Web endpoints
         run: |
@@ -45,7 +48,7 @@ jobs:
               for p in d["personas"]:
                   print("  ", p["id"], "active" if p["active"] else "inactive", "ret", p["return_pct"], "trades", p["trades"], "core", p["core"])
               print("   copying:", d.get("copying"))
-          elif "params" in d:
+          elif "overrides" in d:
               print("   overrides:", d["overrides"], "live:", d["live"], "copying:", d["copying"])
           else:
               print("   return_pct:", d.get("return_pct"), "allocation:", d.get("allocation"), "curve points:", len(d.get("curve") or []))
