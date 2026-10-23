@@ -93,6 +93,18 @@ def write_journals(root: Path) -> None:
               {"ts": now - 1800, "time": t(1800), "event": "entry", "symbol": "SOLUSDT", "setup": "oversold_reversion",
                "reason": "RSI زیر ۳۰ و قیمت زیر باند پایین بولینگر در روند ساعتی خنثی."},
               {"ts": now - 600, "time": t(600), "event": "core", "action": "BUY_USDT", "reason": "core: hold USDT"}]
+        if name == "live":   # what the live journal showed on 2026-10-23: refused market orders, then the fix
+            refused = 'Wallex: اطلاعات وارد شده اشتباه‌است.: {"symbol": ["امکان ثبت سفارش قیمت بازار در USOONUSDT بازار وجود ندارد."]}'
+            for k in range(6):
+                ev += [{"ts": now - 400 + 15 * k, "time": t(400 - 15 * k), "event": "error", "symbol": s,
+                        "error": f"consolidate sell failed: {m}"}
+                       for s, m in (("BTCUSDT", refused.replace("USOONUSDT", "سکو")), ("USOONUSDT", refused))]
+            ev += [{"ts": now - 300, "time": t(300), "event": "error", "symbol": "BTCUSDT",
+                    "error": "consolidate sell failed: sell BTCUSDT did not fill: CANCELED"},
+                   {"ts": now - 300, "time": t(300), "event": "sweep", "symbol": "BTCTMN",
+                    "reason": "consolidate: BTC bought outside the engine sold into TMN on request, for the USDT core"},
+                   {"ts": now - 300, "time": t(300), "event": "sweep", "symbol": "USOONUSDT",
+                    "reason": "consolidate: USOON bought outside the engine sold into USDT on request, for the USDT core"}]
         (d / "decisions.jsonl").write_text("\n".join(json.dumps(e, ensure_ascii=False) for e in ev) + "\n")
         (d / "trades.csv").write_text(hdr + "".join(
             f"T{i},{s},dip_in_uptrend,a,1,1,600000,2026-10-23 0{i}:00:00,1,1,{p * 6000:.0f},{p},{r},,x\n"

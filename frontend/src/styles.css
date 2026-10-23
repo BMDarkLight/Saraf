@@ -898,3 +898,15 @@ table.diff td { padding: 6px; border-top: 1px solid var(--border-soft); unicode-
 .run-panel { margin-bottom: 16px; }
 .run-panel .strat-real { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .run-panel .run-pop { position: static; max-width: 560px; }
+
+/* engine feed: collapsed repeats, resolved errors dimmed, raw error text on demand */
+.feed-row.resolved { opacity: 0.6; }
+.feed-row .pill { font-size: 11px; padding: 1px 8px; }
+.feed-raw { grid-column: 1 / -1; margin-top: 2px; }
+.feed-raw summary { cursor: pointer; }
+.feed-raw code { display: block; white-space: pre-wrap; word-break: break-word; font-size: 11.5px; color: var(--muted);
+                 background: var(--surface-2); border-radius: 8px; padding: 6px 8px; margin-top: 4px; }
+.feed-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.feed-row .feed-time { min-width: 64px; }
+.feed-row .feed-reason, .feed-row .feed-raw { flex-basis: 100%; padding-inline-start: 74px; }
+@media (max-width: 640px) { .feed-row .feed-reason, .feed-row .feed-raw { padding-inline-start: 0; } }

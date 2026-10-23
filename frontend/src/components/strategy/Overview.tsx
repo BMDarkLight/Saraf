@@ -13,6 +13,57 @@ const EVENT_FA: Record<string, string> = {
   circuit_breaker: "ترمز اضطراری", error: "خطا", start: "شروع", stop: "توقف", review: "بازبینی",
 };
 
+const base = (sym?: string) => String(sym ?? "").replace(/(USDT|TMN)$/, "");
+
+/** An engine error in plain Persian; the original stays one click away. */
+function explainError(msg: string): string {
+  const what = msg.startsWith("consolidate") ? "انتقال به هسته تتری" : msg.startsWith("final sweep") ? "فروش پایانی"
+    : msg.startsWith("core") ? "خرید/فروش تتر هسته" : "سفارش";
+  if (msg.includes("قیمت بازار")) return `${what}: والکس سفارش «قیمت بازار» را در این بازار نپذیرفت.`;
+  if (msg.includes("did not fill")) return `${what}: سفارش پر نشد و لغو شد؛ موتور دوباره تلاش می‌کند.`;
+  if (msg.includes("network error")) return `${what}: اتصال به والکس برقرار نشد؛ موتور دوباره تلاش می‌کند.`;
+  if (msg.includes("LLM")) return "مدل هوش مصنوعی پاسخ نداد؛ تصمیم با قواعد گرفته شد.";
+  return `${what} ناموفق بود.`;
+}
+
+const CORE_ACTION_FA: Record<string, string> = {
+  BUY_USDT: "تومان آزاد به تتر تبدیل شد (هسته تتری).", SELL_USDT: "بخشی از تتر هسته به تومان فروخته شد.",
+};
+
+interface FeedItem { event: string; label: string; symbol?: string; time: string; first: string; count: number;
+                     text?: string; raw?: string; resolved?: boolean }
+
+/** The journal (newest first) as a readable feed: identical events in a row collapse into one line with a count,
+ *  errors are explained, and an error a later successful sale of the same coin made moot is marked resolved. */
+function groupFeed(events: any[]): FeedItem[] {
+  const out: FeedItem[] = [];
+  const sold = new Map<string, number>();   // coin -> time of its latest sweep (events are newest first)
+  for (const x of events) {
+    if (x.event === "start") continue;
+    const t = Date.parse(x.time);
+    if (x.event === "sweep" && !sold.has(base(x.symbol))) sold.set(base(x.symbol), t);
+    const raw: string | undefined = x.event === "error" ? String(x.error ?? x.reason ?? "") : undefined;
+    const consolidate = x.event === "sweep" && String(x.reason ?? "").startsWith("consolidate");
+    const item: FeedItem = {
+      event: x.event, symbol: x.symbol, time: x.time, first: x.time, count: 1,
+      label: consolidate ? "انتقال به هسته" : EVENT_FA[x.event] ?? x.event,
+      text: raw !== undefined ? explainError(raw) : consolidate ? `${base(x.symbol)} فروخته شد و به هسته تتری رفت.`
+        : x.event === "core" && CORE_ACTION_FA[x.action] ? CORE_ACTION_FA[x.action] : x.reason,
+      raw, resolved: raw !== undefined && (sold.get(base(x.symbol)) ?? 0) >= t,
+    };
+    // collapse runs of the same thing, also when two alternating errors repeat (A B A B -> A×2 B×2)
+    const same = out.slice(-2).find((o) => o.event === item.event && o.symbol === item.symbol && o.raw === item.raw
+                                           && o.text === item.text);
+    if (same && item.event !== "entry" && item.event !== "exit") {
+      same.count += 1;
+      same.first = item.time;
+      continue;
+    }
+    out.push(item);
+  }
+  return out;
+}
+
 /** Where the strategy stands: performance, where the money is, the gate, positions, the end-of-challenge plan and
  *  the engine's latest decisions, laid out as separate cards instead of one long column. */
 export function Overview({ d, now }: { d: any; now: number }) {
@@ -31,7 +82,7 @@ export function Overview({ d, now }: { d: any; now: number }) {
   const stats = e.stats ?? {};
 
   const total = parts.reduce((a, [, v]) => a + v, 0) || 1;
-  const feed = (e.events ?? []).filter((x: any) => x.event !== "start").slice(0, 12);
+  const feed = groupFeed(e.events ?? []).slice(0, 12);
 
   return (
     <div className="ov2">
@@ -58,12 +109,17 @@ export function Overview({ d, now }: { d: any; now: number }) {
           <h4>آخرین تصمیم‌های موتور</h4>
           {!feed.length && <div className="muted small">هنوز تصمیمی ثبت نشده؛ موتور با بسته شدن هر کندل ۱۵ دقیقه‌ای بازارها را بررسی می‌کند.</div>}
           <div className="feed">
-            {feed.map((x: any, i: number) => (
-              <div className="feed-row" key={i}>
-                <span className="feed-time muted num">{hhmm(Date.parse(x.time))}</span>
-                <span className={`ev ev-${x.event}`}>{EVENT_FA[x.event] ?? x.event}</span>
+            {feed.map((x, i) => (
+              <div className={`feed-row ${x.resolved ? "resolved" : ""}`} key={i}>
+                <span className="feed-time muted num">
+                  {hhmm(Date.parse(x.time))}{x.count > 1 && <> (از {hhmm(Date.parse(x.first)).split(" ").pop()})</>}
+                </span>
+                <span className={`ev ev-${x.event}`}>{x.label}</span>
                 {x.symbol && <b className="ltr small">{x.symbol}</b>}
-                {x.reason && <div className="feed-reason">{x.reason}</div>}
+                {x.count > 1 && <span className="pill num">×{x.count}</span>}
+                {x.resolved && <span className="pill up">برطرف شد</span>}
+                {x.text && <div className="feed-reason">{x.text}</div>}
+                {x.raw && <details className="feed-raw"><summary className="muted small">متن کامل</summary><code className="ltr">{x.raw}</code></details>}
               </div>
             ))}
           </div>
