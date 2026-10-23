@@ -89,14 +89,13 @@ function RealSwitch({ on, liveAt, now, onChanged }: { on: boolean; liveAt?: numb
           <button className="btn ghost sm" onClick={cancelSchedule}>لغو</button>
         </div>
       )}
-      <div className="seg mode-switch" role="radiogroup" aria-label="اجرای استراتژی">
-        <button role="radio" aria-checked={!on} className={!on ? "on" : ""} onClick={() => on && setAsk(true)}>
-          <span className="dot" />اجرای شبیه‌سازی</button>
-        <button role="radio" aria-checked={on} className={on ? "on live" : ""} onClick={() => !on && setAsk(true)}>
-          <span className="dot" />اجرای واقعی</button>
-      </div>
+      <button className={`run-toggle ${on ? "live" : ""}`} role="switch" aria-checked={on} onClick={() => setAsk(true)}
+              title={on ? "استراتژی با پول واقعی اجرا می‌شود" : "استراتژی فقط شبیه‌سازی می‌شود"}>
+        <span className="dot" />{on ? "اجرای واقعی" : "اجرای شبیه‌سازی"}
+        <span className="run-alt muted">{on ? "توقف" : "واقعی کن"}</span>
+      </button>
       {ask && (
-        <div className={`mode-confirm ${on ? "" : "live"}`} role="dialog">
+        <div className={`mode-confirm run-pop ${on ? "" : "live"}`} role="dialog">
           {on ? (
             <p>اجرای واقعی استراتژی متوقف شود؟ موتور به تنظیمات پیش‌فرض برمی‌گردد و حالت برنامه (بالای صفحه) تغییر
               نمی‌کند. تتر خریده‌شده فروخته نمی‌شود.</p>

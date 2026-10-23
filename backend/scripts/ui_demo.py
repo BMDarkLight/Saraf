@@ -102,7 +102,7 @@ def write_journals(root: Path) -> None:
             "regime_reason": "عرضه و تقاضای بازار متعادل است؛ ۴۶٪ بازارهای تتری مثبت‌اند.",
             "core": {"status": "holding", "entry_rate": 273557.8, "slices_done": 0}, "peak": 5010000}))
 
-    pos = {"T0007": {"id": "T0007", "symbol": "SOLUSDT", "setup": "oversold_reversion", "qty": 3.2, "entry_price": 184.1,
+    pos = {"T0007": {"id": "T0007", "symbol": "SOLUSDT", "setup": "oversold_reversion", "qty": 0.012, "entry_price": 184.1,
                      "stop": 179.8, "target": 190.2, "quote": "USDT", "cost_tmn": 600_000}}
     run("live", 0.00001, 260, [("BTCUSDT", 0.8, "take_profit"), ("PEPEUSDT", -1.2, "stop_loss")], pos)
     for i, p in enumerate(PERSONAS):

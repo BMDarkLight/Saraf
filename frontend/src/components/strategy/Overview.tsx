@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { compact, pct, price, tone } from "../../format";
 import { countdown, hhmm, pctOrDash, REASON_FA, Stat } from "./common";
 
-const PHASES: [string, string][] = [["idle", "تبدیل به تتر"], ["holding", "نگهداری تتر + ماهواره"], ["exiting", "خروج به تومان"]];
+const PHASES: [string, string][] = [["idle", "تبدیل به تتر"], ["holding", "نگهداری و معامله"], ["exiting", "خروج به تومان"]];
 export const CORE_FA: Record<string, string> = {
   idle: "آماده‌سازی", holding: "هسته تتری فعال", guarded: "محافظ فعال: سرمایه در تومان", exiting: "در حال خروج به تومان", done: "تسویه شد",
 };
@@ -30,95 +30,108 @@ export function Overview({ d, now }: { d: any; now: number }) {
   const end = d.end_time ? Date.parse(d.end_time) : null;
   const stats = e.stats ?? {};
 
+  const total = parts.reduce((a, [, v]) => a + v, 0) || 1;
+  const feed = (e.events ?? []).filter((x: any) => x.event !== "start").slice(0, 12);
+
   return (
-    <div className="ov">
-      <section className="panel ov-perf">
-        <div className="stats-row">
-          <Stat label="بازده از سرمایه اولیه" value={pctOrDash(d.return_pct)} tone={tone(d.return_pct)} hint="ارزش فعلی حساب نسبت به ۵ میلیون تومان" />
-          <Stat label="نگهداری ساده تتر" value={pctOrDash(vsUsdt)} tone={tone(vsUsdt)} hint="اگر از ابتدای این اجرا فقط تتر نگه می‌داشتیم" />
-          <Stat label="افت از اوج" value={e.drawdown_pct != null ? `${(+e.drawdown_pct).toFixed(2)}%` : "—"} />
-          <Stat label="معاملات بسته‌شده" value={stats.trades ?? 0} />
-          <Stat label="نرخ برد" value={stats.win_rate_pct != null ? `${stats.win_rate_pct}%` : "—"} />
-          <Stat label="تا پایان چالش" value={end ? countdown(end - now) : "تنظیم نشده"} />
-        </div>
-        {d.curve?.length > 1 ? <Curve rows={d.curve} />
-          : <div className="muted empty-line">نمودار ارزش با ثبت‌های ۵ دقیقه‌ای ساخته می‌شود.</div>}
-      </section>
-
-      <section className="panel">
-        <h4>سرمایه کجاست؟</h4>
-        {usdtMode && (
-          <ol className="phases">
-            {PHASES.map(([k, l], i) => (
-              <li key={k} className={i < phaseIdx ? "done" : i === phaseIdx && status !== "done" ? "on" : ""}>{l}</li>
-            ))}
-          </ol>
-        )}
-        <div className="alloc big" role="img" aria-label="ترکیب سرمایه">
-          {parts.map(([l, v, k]) => eq > 0 && v / eq > 0.005 && (
-            <span key={k} className={`seg-${k}`} style={{ flexGrow: v }} title={`${l}: ${price(v)} تومان`} />
-          ))}
-        </div>
-        <div className="alloc-rows">
-          {parts.map(([l, v, k]) => (
-            <div key={k}><i className={`sw seg-${k}`} /><span>{l}</span><span className="spacer" />
-              <b className="num">{compact(v)}</b><span className="muted num">{eq ? Math.round((100 * v) / eq) : 0}%</span></div>
-          ))}
-        </div>
-        {other / Math.max(eq, 1) > 0.02 && (
-          <div className="note">رمزارزی که خارج از موتور خریده شده (مثلاً از چت) جزو ماهواره نیست و سقف ماهواره را پر نمی‌کند؛ در
-            افت سرمایه حساب می‌شود و در پایان چالش به تومان فروخته می‌شود.</div>
-        )}
-        {usdtMode && core?.entry_rate ? <div className="muted small">{CORE_FA[status] ?? status} — میانگین خرید تتر <bdi className="num">{price(core.entry_rate)}</bdi> تومان</div> : null}
-      </section>
-
-      <section className="panel">
-        <h4>دروازه خرید ماهواره <span className={`pill ${e.regime === "risk_off" ? "down" : "up"}`}>{e.regime === "risk_off" ? "بسته" : "باز"}</span>
-          <span className="muted small"> {REGIME_FA[e.regime] ?? e.regime ?? "—"}</span></h4>
-        {e.regime_reason && <p className="reason">{e.regime_reason}</p>}
-        <div className="rules">
-          {p.max_exposure_pct != null && <span>سقف ماهواره {Math.round(p.max_exposure_pct * 100)}٪</span>}
-          {p.risk_per_trade_pct != null && <span>ریسک هر معامله {+(p.risk_per_trade_pct * 100).toFixed(2)}٪</span>}
-          {p.max_positions != null && <span>حداکثر {p.max_positions} پوزیشن</span>}
-          {p.breadth_gate_pct != null && <span>دروازه فراگیری {p.breadth_gate_pct}٪</span>}
-          {p.core_guard_pct != null && usdtMode && <span>محافظ تتر −{Math.round(p.core_guard_pct * 100)}٪</span>}
-          {p.drawdown_stop_pct != null && <span>تسویه در افت {Math.round(p.drawdown_stop_pct * 100)}٪</span>}
-        </div>
-      </section>
-
-      <section className="panel">
-        <h4>پوزیشن‌ها و سفارش‌ها</h4>
-        {!e.positions?.length && !e.pending?.length && <div className="muted small">پوزیشن باز یا سفارش در انتظاری نیست.</div>}
-        {e.positions?.map((x: any) => (
-          <div className="row" key={x.id}><b className="ltr">{x.symbol}</b><span className="muted small">{x.setup}</span><span className="spacer" />
-            <span className="muted small num">ورود {price(x.entry_price)} · ضرر {price(x.stop)} · هدف {price(x.target)}</span></div>
-        ))}
-        {e.pending?.map((o: any, i: number) => (
-          <div className="row" key={i}><b className="ltr">{o.symbol}</b><span className="muted small">سفارش محدود</span><span className="spacer" />
-            <span className="muted small num">{price(o.limit)} · {compact(o.amount_tmn)} تومان</span></div>
-        ))}
-        {e.trades?.length > 0 && <>
-          <h5>آخرین معاملات</h5>
-          {e.trades.slice(0, 5).map((t: any) => (
-            <div className="row" key={t.id}><b className="ltr">{t.symbol}</b><span className="muted small">{REASON_FA[t.reason] ?? t.reason}</span><span className="spacer" />
-              <b className={`num ${tone(t.pnl_pct)}`}>{pct(t.pnl_pct)}</b></div>
-          ))}
-        </>}
-      </section>
-
-      {usdtMode && end && <section className="panel"><ExitPlan end={end} now={now} p={p} done={core?.slices_done ?? 0} /></section>}
-
-      <section className="panel ov-feed">
-        <h4>آخرین تصمیم‌های موتور</h4>
-        {(e.events ?? []).filter((x: any) => x.event !== "start").slice(0, 10).map((x: any, i: number) => (
-          <div className="feed-row" key={i}>
-            <span className={`ev ev-${x.event}`}>{EVENT_FA[x.event] ?? x.event}</span>
-            {x.symbol && <b className="ltr small">{x.symbol}</b>}
-            <span className="muted small num">{hhmm(Date.parse(x.time))}</span>
-            {x.reason && <div className="feed-reason">{x.reason}</div>}
+    <div className="ov2">
+      {/* main column: how it is doing, and what it decided */}
+      <div className="ov2-main">
+        <section className="panel">
+          <div className="kpis">
+            <div className="kpi-big">
+              <span>بازده از سرمایه اولیه</span>
+              <b className={`num ${tone(d.return_pct)}`}>{pctOrDash(d.return_pct)}</b>
+              <small className="muted num">{price(eq)} تومان</small>
+            </div>
+            <div className="kpi-row">
+              <Stat label="نگهداری ساده تتر" value={pctOrDash(vsUsdt)} tone={tone(vsUsdt)} hint="اگر از ابتدای این اجرا فقط تتر نگه می‌داشتیم" />
+              <Stat label="افت از اوج" value={e.drawdown_pct != null ? `${(+e.drawdown_pct).toFixed(2)}%` : "—"} />
+              <Stat label="معاملات" value={stats.trades ? `${stats.trades}` : "۰"} hint={stats.win_rate_pct != null ? `نرخ برد ${stats.win_rate_pct}%` : undefined} />
+            </div>
           </div>
-        ))}
-      </section>
+          {d.curve?.length > 1 ? <Curve rows={d.curve} height={220} />
+            : <div className="muted empty-line">نمودار ارزش با ثبت‌های ۵ دقیقه‌ای ساخته می‌شود.</div>}
+        </section>
+
+        <section className="panel">
+          <h4>آخرین تصمیم‌های موتور</h4>
+          {!feed.length && <div className="muted small">هنوز تصمیمی ثبت نشده؛ موتور با بسته شدن هر کندل ۱۵ دقیقه‌ای بازارها را بررسی می‌کند.</div>}
+          <div className="feed">
+            {feed.map((x: any, i: number) => (
+              <div className="feed-row" key={i}>
+                <span className="feed-time muted num">{hhmm(Date.parse(x.time))}</span>
+                <span className={`ev ev-${x.event}`}>{EVENT_FA[x.event] ?? x.event}</span>
+                {x.symbol && <b className="ltr small">{x.symbol}</b>}
+                {x.reason && <div className="feed-reason">{x.reason}</div>}
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+
+      {/* side stack: where the money is, whether it may buy, what is open, and how it ends */}
+      <div className="ov2-side">
+        <section className="panel">
+          <h4>ترکیب سرمایه</h4>
+          {usdtMode && (
+            <div className="stepper" aria-label="مرحله استراتژی">
+              {PHASES.map(([k, l], i) => (
+                <span key={k} className={i < phaseIdx ? "done" : i === phaseIdx && status !== "done" ? "on" : ""}>{l}</span>
+              ))}
+            </div>
+          )}
+          <div className="alloc big" role="img" aria-label="ترکیب سرمایه">
+            {parts.map(([l, v, k]) => eq > 0 && v / eq > 0.005 && (
+              <span key={k} className={`seg-${k}`} style={{ flexGrow: v }} title={`${l}: ${price(v)} تومان`} />
+            ))}
+          </div>
+          <div className="alloc-rows">
+            {parts.filter(([, v]) => v / total > 0.001).map(([l, v, k]) => (
+              <div key={k}><i className={`sw seg-${k}`} /><span>{l}</span><span className="spacer" />
+                <b className="num">{compact(v)}</b><span className="muted num">{Math.round((100 * v) / total)}%</span></div>
+            ))}
+          </div>
+          {other / Math.max(eq, 1) > 0.02 && (
+            <p className="fine">رمزارز خارج از موتور (مثلاً خرید از چت) سقف ماهواره را پر نمی‌کند و در پایان چالش به تومان فروخته می‌شود.</p>
+          )}
+          {usdtMode && core?.entry_rate ? <p className="fine">میانگین خرید تتر هسته: <bdi className="num">{price(core.entry_rate)}</bdi> تومان</p> : null}
+        </section>
+
+        <section className="panel">
+          <h4>اجازه خرید <span className={`pill ${e.regime === "risk_off" ? "down" : "up"}`}>{e.regime === "risk_off" ? "بسته" : "باز"}</span>
+            <span className="muted small">{REGIME_FA[e.regime] ?? e.regime ?? "—"}</span></h4>
+          {e.regime_reason && <p className="reason clamp3">{e.regime_reason}</p>}
+          <div className="rules">
+            {p.max_exposure_pct != null && <span>سقف ماهواره {Math.round(p.max_exposure_pct * 100)}٪</span>}
+            {p.risk_per_trade_pct != null && <span>ریسک هر معامله {+(p.risk_per_trade_pct * 100).toFixed(2)}٪</span>}
+            {p.max_positions != null && <span>حداکثر {p.max_positions} پوزیشن</span>}
+            {p.breadth_gate_pct != null && <span>دروازه {p.breadth_gate_pct}٪</span>}
+          </div>
+        </section>
+
+        <section className="panel">
+          <h4>پوزیشن‌ها</h4>
+          {!e.positions?.length && !e.pending?.length && <div className="muted small">پوزیشن باز یا سفارش در انتظاری نیست.</div>}
+          {e.positions?.map((x: any) => (
+            <div className="row" key={x.id}><b className="ltr">{x.symbol}</b><span className="spacer" />
+              <span className="muted small num">ورود {price(x.entry_price)} · ضرر {price(x.stop)} · هدف {price(x.target)}</span></div>
+          ))}
+          {e.pending?.map((o: any, i: number) => (
+            <div className="row" key={i}><b className="ltr">{o.symbol}</b><span className="muted small">سفارش محدود</span><span className="spacer" />
+              <span className="muted small num">{price(o.limit)}</span></div>
+          ))}
+          {e.trades?.length > 0 && <>
+            <h5>آخرین معاملات</h5>
+            {e.trades.slice(0, 5).map((t: any) => (
+              <div className="row" key={t.id}><b className="ltr">{t.symbol}</b><span className="muted small">{REASON_FA[t.reason] ?? t.reason}</span><span className="spacer" />
+                <b className={`num ${tone(t.pnl_pct)}`}>{pct(t.pnl_pct)}</b></div>
+            ))}
+          </>}
+        </section>
+
+        {usdtMode && end && <section className="panel"><ExitPlan end={end} now={now} p={p} done={core?.slices_done ?? 0} /></section>}
+      </div>
     </div>
   );
 }

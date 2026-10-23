@@ -105,7 +105,7 @@ function Profile({ p, d, params, onBack, onApplied }: { p: any; d: any; params: 
       <header className="profile-h">
         <div className="profile-cover" />
         <div className="profile-id">
-          <Avatar p={p} size={72} />
+          <Avatar p={p} size={60} />
           <div>
             <h3>{p.name}</h3>
             <span className="muted ltr">@{p.handle}</span>
@@ -118,7 +118,7 @@ function Profile({ p, d, params, onBack, onApplied }: { p: any; d: any; params: 
         </div>
       </header>
       <p className="bio">{p.bio}</p>
-      <div className="stats-row">
+      <div className="stats-row slim">
         <Stat label="بازده (شبیه‌سازی زنده)" value={pctOrDash(p.return_pct)} tone={tone(p.return_pct)} />
         <Stat label="بیشترین افت" value={p.max_drawdown_pct != null ? `${p.max_drawdown_pct}%` : "—"} />
         <Stat label="معاملات" value={p.trades} />
