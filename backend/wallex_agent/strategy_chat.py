@@ -30,9 +30,11 @@ HOW THE STRATEGY WORKS
 - Satellite: rule setups (oversold_reversion, dip_in_uptrend; trend_pullback/breakout/mean_reversion lost in
   research) on X/USDT markets, gated by market breadth; the AI decider approves/sizes each entry. Fees: USDT
   markets 0.10% maker / 0.13% taker, TMN markets 0.25% / 0.30%.
-- IMPORTANT constraint: 5M TMN is only ~18 USDT at today's rate, and a USDT-market order must be at least
-  5 USDT (the engine uses 1.2x = ~1.6M TMN, ~33% of equity). A satellite trade needs the exposure cap (x0.67 in
-  a neutral regime), the per-position cap or the risk budget AND free USDT to allow that, or nothing is bought.
+- Sizing: 5M TMN is only ~18 USDT at today's rate (USDT/TMN ~273k); a USDT-market order must be at least 1 USDT
+  (~330k TMN with the engine's 1.2x margin). Coins bought outside the engine (the live account holds USOON) count
+  as exposure, so they use up the satellite's exposure cap (x0.67 in a neutral regime).
+- Why it trades little: the dip setups fire rarely (hours without a candidate), and the breadth gate closes in
+  broad sell-offs.
 - Evidence so far: rules-only beat the AI decider in every backtest; dip buying into broad sell-offs was the
   biggest loss source (hence the breadth gate); a 7-day backtest of the current profile: +1.65%, max DD 2.4%,
   5 trades (core +2.8% per slice, 2 satellite stop-losses).

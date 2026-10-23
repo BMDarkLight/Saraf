@@ -349,7 +349,7 @@ async def test_usdt_core_rides_the_rate_and_ends_in_toman(tmp_path):
     assert len(core) == 3 and sum(float(t["pnl_tmn"]) for t in core) > 0       # the rate rose ~2.4% over the window
     assert broker.cash_by["TMN"] > 5_000_000                                     # realized in TMN, above capital
     sat = [t for t in trades if t["setup"] != "usdt_core"]
-    assert all(float(t["cost_tmn"]) <= 0.25 * 5_200_000 for t in sat)           # satellite sized in TMN, capped
+    assert all(float(t["cost_tmn"]) <= 0.125 * 5_200_000 for t in sat)          # satellite sized in TMN, capped
 
 
 async def test_core_guard_moves_to_toman_and_blocks_entries(tmp_path):
@@ -393,19 +393,13 @@ def test_size_takes_the_exchange_minimum_when_the_risk_budget_allows_it(tmp_path
     assert big.quote_amount == pytest.approx(625_000)
 
 
-async def test_usdt_satellite_actually_trades_with_the_strategy_profile(tmp_path):
-    async def events_with(d, **profile):
-        engine, broker, feed = usdt_engine(d, line(190_000, 191_000), CoreDecider(core="WAIT"),
-                                           aaa=synth(start=1.0, crash_at=3 * 1440 + 300), **profile)
-        await run(engine, feed, T0 + 3 * 86_400, T0 + 4 * 86_400 - 60)   # the dip comes on day 3
-        return [json.loads(l) for l in (d / "run" / "decisions.jsonl").read_text().splitlines()]
-    old = await events_with(tmp_path / "old")                    # 30% exposure x 0.67, 12.5% cap: never an order
-    assert not any(e["event"] in ("entry", "entry_order") for e in old)
-    assert any(e["event"] == "risk_block" and "below the minimum" in e["reason"] for e in old)
-    new = await events_with(tmp_path / "new", engine_max_exposure_pct=0.5, engine_max_position_pct=0.25,
-                            engine_max_positions=2)
-    entries = [e for e in new if e["event"] == "entry"]
-    assert entries and all(e["cost_tmn"] * 191_000 <= 0.5 * 5_100_000 for e in entries)   # cost_tmn is in USDT here
+async def test_usdt_satellite_trades_with_the_strategy_profile(tmp_path):
+    engine, broker, feed = usdt_engine(tmp_path, line(273_000, 274_000), CoreDecider(core="WAIT"),
+                                       aaa=synth(start=1.0, crash_at=3 * 1440 + 300))
+    await run(engine, feed, T0 + 3 * 86_400, T0 + 4 * 86_400 - 60)   # the dip comes on day 3
+    events = [json.loads(l) for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines()]
+    assert any(e["event"] == "entry" for e in events)
+    assert not any(e["event"] == "risk_block" and "below the minimum" in e["reason"] for e in events)
 
 
 async def test_ai_falls_back_to_the_rule_baseline_when_the_model_fails(tmp_path):

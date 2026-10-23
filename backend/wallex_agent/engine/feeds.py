@@ -204,7 +204,7 @@ class SimFeed:
         return []   # historical headlines are not reproducible; documented limitation
 
     async def min_notional(self, symbol: str) -> float:
-        return 50_000 if symbol.endswith("TMN") else 5.0   # Wallex: 50k TMN / 5 USDT
+        return 50_000 if symbol.endswith("TMN") else 1.0   # Wallex /v1/markets minNotional: 50k TMN / 1 USDT
 
     def future_1m(self, symbol: str, start: float, end: float) -> list[Bar]:
         times = self._t1[symbol]
