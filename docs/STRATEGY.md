@@ -124,13 +124,33 @@ The strategy is a page of its own in the UI (header switch «استراتژی»)
 |---|---|---|
 | Overview | return vs capital and vs holding USDT, the curve, where the money is (core / satellite / coins bought outside the engine / TMN), the gate, positions, the end-of-challenge plan, the latest decisions | `strategy/Overview.tsx`, `GET /api/strategy` |
 | Tuning | ~20 bounded engine settings (size and risk, entries, execution, AI, core and end). Saved to `data/engine/tuning.env`, which `wallex-engine.service` loads after the profile; the engine restarts. Live mode asks first | `wallex_agent/tuning.py`, `GET/POST /api/strategy/tuning` |
-| Copy-trading | personas = named presets of those settings. Each runs as its own shadow session (`wallex-persona@<id>.service`, journal `data/engine/persona-<id>`), so a profile shows a real track record. Copying writes the preset to `tuning.env` on the strategy profile | `wallex_agent/personas.py`, `GET /api/personas`, `POST /api/personas/{id}/copy`, `/api/personas/stop-copy` |
+| Copy-trading | live trader personas (below) and personas = named presets of those settings. Each runs as its own shadow session (`wallex-persona@<id>.service`, journal `data/engine/persona-<id>`), so a profile shows a real track record. Copying writes the preset to `tuning.env` on the strategy profile | `wallex_agent/personas.py`, `GET /api/personas`, `POST /api/personas/{id}/copy`, `/api/personas/stop-copy` |
 | Assistant | a chat about the strategy, saved per conversation (`data/strategy_chats`). With «اعمال مستقیم» on, the model sets parameters itself when asked (`apply_changes` tool; validated against the tuning bounds, logged with the old values, one-click undo); off, it only proposes diffs | `wallex_agent/strategy_chat.py`, `/api/strategy/chat`, `/api/strategy/chats` |
 | Timings | the tuning tab's first group: challenge end (Tehran time), stop-new-entries and sell-everything lead times, the USDT exit window and slices, the drawdown pause, the time stop, entry timeout and cooldown. `tuning.env` loads after `deploy/challenge.env`, so a UI end time wins; past end times are refused | `tuning.py` |
 | On/off | the engine card's switch writes `data/engine/control.json`: off = no new entries and no new USDT buys, while stops, targets, the core guard and the final sell-off keep running (no restart) | `Engine.paused`, `POST /api/engine/switch` |
 | Evidence | the research table above | |
 
 Personas other than the strategist use the rule decider, so several sessions don't spend the engine's LLM budget.
+
+### Live trader personas (copying real traders)
+
+Hyperliquid is an on-chain perpetuals exchange: every account's open positions and fills are public through its info
+API (no key; the VPS reaches it). `wallex-traders.service` (`wallex_agent/traders.py`) follows:
+
+- the leaderboard's consistently profitable large accounts: positive week, month and all time, at least $2M, ranked by
+  30-day profit (re-picked weekly; the ~40 MB leaderboard is read as a stream);
+- any address the owner adds in the UI, with a name of their choosing.
+
+A trader is shown by the name they set on Hyperliquid, or the owner's name for the address; an address is never
+labelled as a known person otherwise. Every minute each trader's positions are read; their **longs** in coins Wallex
+lists become target weights on the USDT markets (leverage dropped, at most 100%), and a simulated 5M TMN copy moves
+toward them at live Wallex prices with real fees (2% band against fee churn). **Shorts cannot be copied on spot**: that
+share stays in USDT. Each trader's journal (`data/engine/trader-<address>`) records what they did and what the copy did.
+
+«کپی زنده» puts one trader on the main engine (`ENGINE_FOLLOW_ADDRESS`, `ENGINE_FOLLOW_PCT`, `engine/follow.py`): up to
+the chosen share of equity follows their longs from the core's USDT; the satellite is off meanwhile. New buys respect
+the on/off switch, the drawdown pause and halt, and the no-entry window; stopping the copy sells its coins back to
+USDT; the challenge-end sweep sells everything to TMN as before.
 
 ## 8. Remaining steps
 
