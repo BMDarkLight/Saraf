@@ -672,3 +672,44 @@ async def test_live_copy_buys_nothing_while_switched_off(tmp_path):
     feed.t += 120
     await engine.monitor()
     assert engine.state["follow"]["holdings"]
+
+
+async def test_two_setups_on_the_same_coin_make_one_entry(tmp_path, monkeypatch):
+    """Live 2026-10-23 19:00: dip_in_uptrend and oversold_reversion both fired on PENGUUSDT and each got its own order
+    (~20% of equity on one coin). Only the stronger setup may enter."""
+    from wallex_agent.engine.strategy import Candidate
+    engine, broker, feed = usdt_engine(tmp_path, line(273_000, 274_000), CoreDecider(action="TAKE"))
+    feed.t = T0 + 3 * 86_400                                 # enough hourly history for the features
+    await engine.monitor()                                   # the core buys USDT first
+
+    def two(sym, f, *a, **kw):
+        if sym != "AAAUSDT" or not f:
+            return []
+        px = f["close"]
+        return [Candidate(sym, "dip_in_uptrend", 0.8, px, px * 0.01, 1.5, 2.0),
+                Candidate(sym, "oversold_reversion", 0.7, px, px * 0.01, 1.5, 2.0)]
+    monkeypatch.setattr(strategy, "candidates", two)
+    await engine.on_bar()
+    held = [p["symbol"] for p in [*engine.positions.values(), *engine.pending.values()]]
+    assert held.count("AAAUSDT") == 1
+    assert [p.get("setup") for p in [*engine.positions.values(), *engine.pending.values()]] == ["dip_in_uptrend"]
+    await engine.on_bar()                                    # and not again on the next bar while it is held
+    assert [p["symbol"] for p in [*engine.positions.values(), *engine.pending.values()]].count("AAAUSDT") == 1
+
+
+async def test_a_duplicate_entry_order_already_on_the_book_is_cancelled(tmp_path):
+    """Orders placed before the fix: the engine cancels the smaller of two entry orders on one coin and keeps the
+    other."""
+    engine, broker, feed = usdt_engine(tmp_path, line(273_000, 274_000), CoreDecider(action="TAKE"))
+    feed.t = T0 + 3 * 86_400
+    await engine.monitor()
+    bid = (await feed.quote("AAAUSDT"))["bid"]
+    for amount, qty in ((600_000, 2.0), (370_000, 1.2)):
+        oid = await broker.place_limit("AAAUSDT", "BUY", qty, bid * 0.9, "AAA")   # rests below the market
+        engine.pending[oid] = {"symbol": "AAAUSDT", "setup": "dip_in_uptrend", "limit": bid * 0.9, "atr": bid * 0.01,
+                               "ask_at_order": bid * 1.1, "amount_tmn": amount, "placed_at": feed.t, "expires_at": feed.t + 3600}
+    feed.t += 60
+    await engine.monitor()
+    assert [o["amount_tmn"] for o in engine.pending.values()] == [600_000]
+    events = [json.loads(l) for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines()]
+    assert any(e["event"] == "entry_cancelled" and "second entry" in e["reason"] for e in events)

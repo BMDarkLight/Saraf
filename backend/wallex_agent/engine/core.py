@@ -275,15 +275,21 @@ class Engine:
                 self.journal.log("error", now, symbol=sym, error=f"data: {e}")
                 continue
             f = compute(bars, htf)
-            for c in strategy.candidates(sym, f, self.s.engine_min_atr_pct, self.s.engine_max_atr_pct, self.setups,
-                                         self.s.engine_dip_atr):
-                busy = any(p["symbol"] == sym for p in [*self.positions.values(), *self.pending.values()])
-                if c.score >= self.s.engine_min_score and not busy:
-                    cands.append((c, f))
+            busy = self._busy(sym)
+            ok = [c for c in strategy.candidates(sym, f, self.s.engine_min_atr_pct, self.s.engine_max_atr_pct,
+                                                 self.setups, self.s.engine_dip_atr)
+                  if c.score >= self.s.engine_min_score and not busy]
+            if ok:   # one entry per coin: when two setups fire on the same bar, only the stronger one is considered
+                cands.append((max(ok, key=lambda c: c.score), f))
         cands.sort(key=lambda x: -x[0].score)
         for cand, f in cands[: self.s.engine_max_ai_calls_per_bar]:
-            await self._consider(cand, f, now)
+            if not self._busy(cand.symbol):
+                await self._consider(cand, f, now)
         self.save()
+
+    def _busy(self, symbol: str) -> bool:
+        """The engine already holds or is buying this coin: never a second entry on top."""
+        return any(p["symbol"] == symbol for p in [*self.positions.values(), *self.pending.values()])
 
     async def _update_regime(self, now: float) -> None:
         ctx = {"time_utc": time.strftime("%Y-%m-%d %H:%M", time.gmtime(now)), **(await self.feed.market_context())}
@@ -386,20 +392,27 @@ class Engine:
         self.save()
 
     async def _process_pending(self, now: float) -> None:
-        """Entry limits: open the position on fill; cancel when stale or when price ran away."""
+        """Entry limits: open the position on fill; cancel when stale, when price ran away, or when it is a second
+        entry on a coin the engine already holds or is buying (the larger order is kept)."""
         for oid, o in list(self.pending.items()):
+            if oid not in self.pending:
+                continue
             st = await self.broker.order_status(oid)
             if st.status == "open":
                 ask = (await self.feed.quote(o["symbol"]))["ask"]
                 # measured from the ask at order time: the spread alone must not count as running away
                 ran_away = ask > o.get("ask_at_order", o["limit"]) + self.s.engine_entry_chase_atr * o["atr"]
-                if now < o["expires_at"] and not ran_away:
+                dup = any(p["symbol"] == o["symbol"] for p in self.positions.values()) or any(
+                    k != oid and p["symbol"] == o["symbol"] and (p.get("amount_tmn", 0), k) > (o.get("amount_tmn", 0), oid)
+                    for k, p in self.pending.items())
+                if now < o["expires_at"] and not ran_away and not dup:
                     continue
                 st = await self.broker.cancel(oid)
                 if st.filled_qty <= 0:
                     del self.pending[oid]
                     self.journal.log("entry_cancelled", now, symbol=o["symbol"], setup=o["setup"], order_id=oid,
-                                     reason="price ran away from the limit" if ran_away else "not filled in time")
+                                     reason="second entry on a coin already held or being bought" if dup
+                                     else "price ran away from the limit" if ran_away else "not filled in time")
                     self.save()
                     continue
             del self.pending[oid]
