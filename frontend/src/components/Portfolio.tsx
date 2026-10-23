@@ -44,7 +44,9 @@ export function Portfolio({ refreshKey, assistantLive, onOpenStrategy }: {
 
   return (
     <>
-      <AccountCard acc={acc} capital={strat?.engine?.capital_tmn ?? 5_000_000} />
+      <AccountCard acc={acc} capital={strat?.engine?.capital_tmn ?? 5_000_000} live={strat?.mode === "live"}
+                   managed={(strat?.engine?.positions ?? []).map((p: any) => String(p.symbol).replace(/(USDT|TMN)$/, ""))}
+                   onChanged={() => getJSON("/api/account").then(setAcc).catch(() => {})} />
       <EngineCard d={strat} onOpen={onOpenStrategy} onChanged={() => getJSON("/api/strategy").then(setStrat).catch(() => {})} />
       {!assistantLive && (
         <button className="link-btn" onClick={() => setShowPaper(!showPaper)}>
@@ -56,7 +58,20 @@ export function Portfolio({ refreshKey, assistantLive, onOpenStrategy }: {
   );
 }
 
-function AccountCard({ acc, capital }: { acc: any; capital: number }) {
+function AccountCard({ acc, capital, live, managed, onChanged }: {
+  acc: any; capital: number; live: boolean; managed: string[]; onChanged: () => void;
+}) {
+  const [move, setMove] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const consolidate = async () => {
+    setBusy(true); setErr("");
+    try {
+      await postJSON("/api/engine/consolidate", { assets: [move], confirm: live ? "LIVE" : "" });
+      setMove(null);
+      setTimeout(onChanged, 20000);   // the engine sells on its next tick (every ~15s)
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
   if (!acc) return <div className="card rail-card"><div className="card-b muted">در حال بارگذاری…</div></div>;
   const spot = acc.spot;
   const total = spot?.total_value_tmn ?? null;
@@ -108,10 +123,22 @@ function AccountCard({ acc, capital }: { acc: any; capital: number }) {
                     <span className="muted small num">{r.asset === "TMN" ? "" : `${compact(r.total)} ${r.asset}`}{r.locked ? " · قفل" : ""}</span>
                   </div>
                   <span className="hold-pct muted num">{total ? Math.round((100 * r.tmn) / total) : 0}%</span>
+                  {r.asset !== "TMN" && r.asset !== "USDT" && !managed.includes(r.asset) && (
+                    <button className="btn ghost sm hold-move" title="فروش این رمزارز به تتر برای هسته استراتژی"
+                            onClick={() => setMove(r.asset)}>به هسته تتری</button>
+                  )}
                 </div>
               ))}
             </div>
           </>
+        )}
+        {move && (
+          <ConfirmDialog title={`انتقال ${move} به هسته تتری`} danger={live} busy={busy} error={err}
+                         okLabel={live ? "بله، با پول واقعی بفروش" : "بفروش"} onOk={consolidate}
+                         onCancel={() => { setMove(null); setErr(""); }}>
+            <p>موتور در چرخه بعدی کل {move} آزاد را در بازار {move}USDT می‌فروشد (یک کارمزد، بدون رفت‌وبرگشت تومان) و تتر حاصل
+              بخشی از هسته تتری استراتژی می‌شود.</p>
+          </ConfirmDialog>
         )}
       </div>
     </div>

@@ -850,8 +850,34 @@ async def engine_switch(body: PauseIn):
     if body.on:
         _check_live_confirm(body.confirm)
     CONTROL_FILE.parent.mkdir(parents=True, exist_ok=True)
-    CONTROL_FILE.write_text(json.dumps({"paused": not body.on, "at": time.time()}))
+    try:
+        ctl = json.loads(CONTROL_FILE.read_text())
+    except (OSError, ValueError):
+        ctl = {}
+    CONTROL_FILE.write_text(json.dumps({**ctl, "paused": not body.on, "at": time.time()}))
     return {"ok": True, "on": not engine_paused()}
+
+
+class ConsolidateIn(BaseModel):
+    assets: list[str]
+    confirm: str = ""      # selling real coins: "LIVE" in live mode
+
+
+@app.post("/api/engine/consolidate")
+async def engine_consolidate(body: ConsolidateIn):
+    """Ask the engine to sell coins bought outside it into the strategy's quote (the USDT core) on its next tick."""
+    _check_live_confirm(body.confirm)
+    assets = sorted({a.strip().upper() for a in body.assets if a.strip().isalnum()} - {"TMN", "USDT"})
+    if not assets:
+        raise HTTPException(400, "no asset to consolidate")
+    try:
+        ctl = json.loads(CONTROL_FILE.read_text())
+    except (OSError, ValueError):
+        ctl = {}
+    ctl["consolidate"] = sorted(set(ctl.get("consolidate") or []) | set(assets))
+    CONTROL_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CONTROL_FILE.write_text(json.dumps(ctl))
+    return {"ok": True, "pending": ctl["consolidate"]}
 
 
 class StrategyChatIn(BaseModel):

@@ -890,3 +890,5 @@ table.diff td { padding: 6px; border-top: 1px solid var(--border-soft); unicode-
 .proposal.undone { border-color: var(--border); opacity: 0.75; }
 .proposal.undone .proposal-h { color: var(--muted); }
 .switch.on { flex-direction: row-reverse; padding: 3px 3px 3px 12px; }
+.hold { flex-wrap: wrap; }
+.hold-move { margin-inline-start: auto; }

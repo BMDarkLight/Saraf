@@ -15,6 +15,9 @@ on:
       profile:
         description: env file loaded before the backtest (e.g. deploy/strategy.env); empty = defaults
         default: "deploy/strategy.env"
+      consolidate:
+        description: "coins to sell into the USDT core on the live engine's next tick, e.g. USOON (the owner's request; empty = none)"
+        default: ""
 
 concurrency:
   group: status-vps
@@ -54,6 +57,13 @@ jobs:
               print("   return_pct:", d.get("return_pct"), "allocation:", d.get("allocation"), "curve points:", len(d.get("curve") or []))
           PY
           done
+      - name: Consolidate request
+        if: ${{ inputs.consolidate != '' }}
+        env:
+          ASSETS: ${{ inputs.consolidate }}
+        run: |
+          body=$(python3 -c "import json,os; print(json.dumps({'assets': os.environ['ASSETS'].split(','), 'confirm': 'LIVE'}))")
+          curl -s -X POST -H 'Content-Type: application/json' -d "$body" http://127.0.0.1:8000/api/engine/consolidate; echo
       - name: Engine report
         working-directory: /opt/wallex-agent/backend
         env:

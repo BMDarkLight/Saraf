@@ -509,3 +509,22 @@ async def test_strategy_switch_off_pauses_entries_and_usdt_buys_but_not_exits(tm
     feed.t += 60
     await engine.monitor()
     assert broker.cash_by["USDT"] > 0
+
+
+async def test_consolidate_sells_an_outside_coin_into_the_usdt_core(tmp_path):
+    """Owner's decision 2026-10-23: move the USOON bought by hand into the USDT core, via its USDT market."""
+    m1 = {"AAAUSDT": synth(start=1.0), "OILUSDT": synth(seed=5, start=160.0), "OILTMN": synth(seed=5, start=43_000_000.0),
+          "USDTTMN": line(273_000, 274_000)}
+    feed = SimFeed(m1, {k: hourly(v) for k, v in m1.items()}, 15, {k: 0.002 for k in m1})
+    s = make_settings(tmp_path, engine_quote="USDT", engine_fee_rate=0.0013)
+    broker = SimExec(feed, 1_000_000, s.engine_fee_rate, quote="USDT", tmn_fee_rate=0.003)
+    broker.holdings["OIL"] = 0.09
+    control = tmp_path / "control.json"
+    control.write_text('{"paused": false, "consolidate": ["OIL"]}')
+    engine = Engine(s, feed, broker, CoreDecider(action="SKIP"), Journal(tmp_path / "run"), control_path=control)
+    feed.t = T0 + 86_400
+    await engine.monitor()
+    assert broker.holdings["OIL"] < 1e-9 and broker.cash_by["USDT"] > 0.09 * 150    # sold for USDT, kept as USDT
+    assert json.loads(control.read_text()) == {"paused": False, "consolidate": []}
+    events = [json.loads(l) for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines()]
+    assert any(e["event"] == "sweep" and e["symbol"] == "OILUSDT" for e in events)

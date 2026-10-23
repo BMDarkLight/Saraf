@@ -80,6 +80,49 @@ class Engine:
         except (OSError, ValueError):
             return False
 
+    async def _consolidate(self, now: float) -> None:
+        """One-shot request from the UI (control.json "consolidate": [assets]): sell those coins - bought outside the
+        engine - into the trading quote, so the USDT core holds them. Prefers the asset's own quote market (USDT: one fee,
+        no TMN round trip). Each asset is removed from the request once sold or found empty."""
+        if not self.control_path:
+            return
+        try:
+            ctl = json.loads(self.control_path.read_text())
+        except (OSError, ValueError):
+            return
+        todo = [a for a in ctl.get("consolidate") or [] if a not in ("TMN", self.quote)]
+        if not todo:
+            return
+        managed = {p["base"] for p in self.positions.values()}
+        left = []
+        wallet = await self.broker.wallet()
+        for asset in todo:
+            free = wallet.get(asset, (0.0, 0.0))[0]
+            if asset in managed or free <= 0:
+                continue
+            for symbol in (f"{asset}{self.quote}", f"{asset}TMN"):
+                try:
+                    bid = (await self.feed.quote(symbol))["bid"]
+                    floor = await self.feed.min_notional(symbol)
+                except Exception:
+                    continue
+                if not bid or free * bid < floor:
+                    break
+                try:
+                    fill = await self.broker.sell(symbol, free, asset)
+                except Exception as e:
+                    self.journal.log("error", now, symbol=symbol, error=f"consolidate sell failed: {e}")
+                    left.append(asset)
+                    break
+                self.journal.log("sweep", now, symbol=symbol, qty=fill.qty, price=fill.price, proceeds=fill.tmn,
+                                 reason=f"consolidate: {asset} bought outside the engine sold into {split_symbol(symbol)[1]} "
+                                        "on request, for the USDT core")
+                break
+        ctl["consolidate"] = left
+        tmp = self.control_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(ctl))
+        tmp.replace(self.control_path)
+
     def save(self) -> None:
         if self.state_path:
             tmp = self.state_path.with_suffix(".tmp")
@@ -377,6 +420,7 @@ class Engine:
     async def monitor(self) -> None:
         now = self.feed.now()
         await self._process_pending(now)     # record fills before valuing the account
+        await self._consolidate(now)
         eq, cash, exposure = await self.equity()
         if eq > self.state["peak"]:
             self.state["peak"] = eq
