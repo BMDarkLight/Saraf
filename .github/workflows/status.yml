@@ -10,7 +10,7 @@ on:
         description: newest journal events to print per run
         default: "60"
       backtest:
-        description: optional backtest args, e.g. "--days 7 --decider rules" (empty = no backtest)
+        description: optional backtest args, e.g. "--days 7 --decider rules", or "personas --days 7" for every persona (empty = no backtest)
         default: ""
       profile:
         description: env file loaded before the backtest (e.g. deploy/strategy.env); empty = defaults
@@ -71,5 +71,16 @@ jobs:
           /root/.local/bin/uv sync --frozen
           set -a; [ -n "$PROFILE" ] && . "../$PROFILE"; set +a
           # no .env in the checkout: public market data only, rules decider unless asked otherwise
-          /root/.local/bin/uv run python -m wallex_agent.engine backtest $ARGS
-          for d in $(ls -td ../data/backtests/*/ | head -2); do echo "== $d"; head -45 "$d/report.md"; done
+          if [ "${ARGS%% *}" = "personas" ]; then
+            # "personas --days 7": one rules backtest per persona; a JSON line each for results/personas/<id>.json
+            REST="${ARGS#personas}"
+            for id in $(/root/.local/bin/uv run python -c "from wallex_agent.personas import PERSONAS; print(' '.join(p['id'] for p in PERSONAS))"); do
+              rm -rf ../data/backtests
+              /root/.local/bin/uv run python -m wallex_agent.engine backtest $REST --decider rules --persona "$id" > /dev/null
+              m=$(ls -d ../data/backtests/*/ | head -1)
+              python3 -c "import json,sys; m=json.load(open(sys.argv[1]+'metrics.json')); print('PERSONA_BT', json.dumps({'id': sys.argv[2], 'days': float(sys.argv[3]), **{k: m.get(k) for k in ('net_return_pct','max_drawdown_pct','trades','win_rate_pct','profit_factor','fees_paid_tmn')}}))" "$m" "$id" "$(echo $REST | sed -E 's/.*--days ([0-9.]+).*/\1/')"
+            done
+          else
+            /root/.local/bin/uv run python -m wallex_agent.engine backtest $ARGS
+            for d in $(ls -td ../data/backtests/*/ | head -2); do echo "== $d"; head -45 "$d/report.md"; done
+          fi
