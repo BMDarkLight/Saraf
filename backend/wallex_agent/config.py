@@ -88,6 +88,7 @@ class Settings(BaseSettings):
     engine_pause_hours: float = 12
     engine_min_atr_pct: float = 0.35                    # skip markets too quiet to beat fees
     engine_max_atr_pct: float = 4.0
+    engine_dip_atr: float = 0.0                         # >0: dip_in_uptrend needs a 1h fall of this many ATRs (0 = fixed -1.5%)
     engine_min_score: float = 0.5                       # rule score needed to reach the decider
     engine_setups: str = "oversold_reversion,dip_in_uptrend"  # see strategy.ALL_SETUPS
     engine_max_ai_calls_per_bar: int = 4

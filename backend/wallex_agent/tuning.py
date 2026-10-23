@@ -35,6 +35,8 @@ PARAMS: list[dict[str, Any]] = [
      "label": "حداقل امتیاز سیگنال"},
     {"key": "engine_breadth_gate_pct", "type": "float", "min": 0.0, "max": 60.0, "step": 5.0, "group": "entry",
      "label": "دروازه فراگیری بازار (٪ مثبت)", "help": "کمتر از این درصد بازارِ مثبت در ۲۴ ساعت = خرید ممنوع"},
+    {"key": "engine_dip_atr", "type": "float", "min": 0.0, "max": 8.0, "step": 0.5, "group": "entry",
+     "label": "اندازه افت لازم (برحسب ATR)", "help": "۰ = افت ثابت ۱٫۵٪ در یک ساعت؛ بیشتر از ۰ = افت نسبت به نوسان همان بازار"},
     {"key": "engine_min_atr_pct", "type": "float", "min": 0.1, "max": 1.5, "step": 0.05, "group": "entry",
      "label": "حداقل نوسان (ATR٪)"},
     {"key": "engine_universe_size", "type": "int", "min": 3, "max": 20, "step": 1, "group": "entry",

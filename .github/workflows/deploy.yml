@@ -8,7 +8,7 @@ on:
   push:
     branches: [main]
     # monitoring and docs only: no restart of the live engine
-    paths-ignore: [".github/workflows/status.yml", "backend/scripts/**", "docs/**", "results/**", "*.md"]
+    paths-ignore: [".github/workflows/status.yml", "backend/scripts/**", "docs/**", "results/**", "deploy/experiments/**", "*.md"]
   workflow_dispatch:
 
 concurrency:

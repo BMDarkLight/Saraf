@@ -483,3 +483,13 @@ async def test_network_errors_name_the_exception():
     c._http = httpx.AsyncClient(base_url="https://x", transport=httpx.MockTransport(handler))
     with pytest.raises(WallexError, match=r"after 3 tries: ReadTimeout$"):
         await c.balances()
+
+
+def test_dip_threshold_can_scale_with_volatility():
+    f = {"close": 100.0, "atr": 0.15, "atr_pct": 0.15, "rsi": 35, "rsi_prev": 36, "adx": 20, "htf_trend": "up",
+         "ret_4": -0.6, "htf_ret_24": 1.0, "htf_ema20": 101, "htf_ema50": 99, "bb_lower": 90, "bb_mid": 100,
+         "ema20": 100, "ema50": 99, "donchian_high": 105, "volume_z": 0}
+    assert not strategy.candidates("BTCUSDT", f, 0.1, 4.0)                       # -0.6% is no dip at a fixed -1.5%
+    c = strategy.candidates("BTCUSDT", f, 0.1, 4.0, dip_atr=3.0)                 # but it is 4 ATRs on a calm market
+    assert [x.setup for x in c] == ["dip_in_uptrend"] and 0.45 <= c[0].score <= 1.0
+    assert not strategy.candidates("BTCUSDT", {**f, "ret_4": -0.3}, 0.1, 4.0, dip_atr=3.0)

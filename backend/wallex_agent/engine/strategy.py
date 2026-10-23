@@ -39,8 +39,10 @@ ALL_SETUPS = DEFAULT_SETUPS + ("trend_pullback", "breakout", "mean_reversion")
 
 
 def candidates(symbol: str, f: dict, min_atr_pct: float, max_atr_pct: float,
-               setups: tuple[str, ...] = DEFAULT_SETUPS) -> list[Candidate]:
-    """Evaluate the enabled setups on one feature snapshot."""
+               setups: tuple[str, ...] = DEFAULT_SETUPS, dip_atr: float = 0.0) -> list[Candidate]:
+    """Evaluate the enabled setups on one feature snapshot. `dip_atr` > 0 sizes the dip_in_uptrend pullback in ATRs
+    (a 1-hour fall of more than dip_atr x the 15m ATR) instead of a fixed -1.5%, which calm USDT majors (ATR ~0.1-0.2%)
+    almost never reach."""
     out: list[Candidate] = []
     if not f or not (min_atr_pct <= f["atr_pct"] <= max_atr_pct):
         return out  # too quiet to beat fees, or too wild to size safely
@@ -61,11 +63,12 @@ def candidates(symbol: str, f: dict, min_atr_pct: float, max_atr_pct: float,
         ]))
 
     # B) Dip in an up-trend: the 1h trend is up but price fell >1.5% over the last 4 bars.
-    if "dip_in_uptrend" in setups and f["htf_trend"] == "up" and f["ret_4"] < -1.5 and rsi_v < 40:
-        score = 0.45 + 0.25 * _clip(-f["ret_4"] / 4) + 0.15 * _clip((40 - rsi_v) / 15) + 0.15 * _clip(f["htf_ret_24"] / 5)
+    dip = -(dip_atr * f["atr_pct"]) if dip_atr > 0 else -1.5
+    if "dip_in_uptrend" in setups and f["htf_trend"] == "up" and f["ret_4"] < dip and rsi_v < 40:
+        score = 0.45 + 0.25 * _clip(f["ret_4"] / (4 * dip / 1.5)) + 0.15 * _clip((40 - rsi_v) / 15) + 0.15 * _clip(f["htf_ret_24"] / 5)
         out.append(Candidate(symbol, "dip_in_uptrend", round(score, 3), c, a, 2.5, 3.5, [
             f"1h trend up (EMA20 {f['htf_ema20']:.6g} > EMA50 {f['htf_ema50']:.6g}, 24h {f['htf_ret_24']:+.2f}%)",
-            f"pulled back {f['ret_4']:+.2f}% over the last 4 bars",
+            f"pulled back {f['ret_4']:+.2f}% over the last 4 bars (threshold {dip:.2f}%)",
             f"RSI {rsi_v:.1f} < 40",
         ]))
 

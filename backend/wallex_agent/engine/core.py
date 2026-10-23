@@ -204,7 +204,8 @@ class Engine:
                 self.journal.log("error", now, symbol=sym, error=f"data: {e}")
                 continue
             f = compute(bars, htf)
-            for c in strategy.candidates(sym, f, self.s.engine_min_atr_pct, self.s.engine_max_atr_pct, self.setups):
+            for c in strategy.candidates(sym, f, self.s.engine_min_atr_pct, self.s.engine_max_atr_pct, self.setups,
+                                         self.s.engine_dip_atr):
                 busy = any(p["symbol"] == sym for p in [*self.positions.values(), *self.pending.values()])
                 if c.score >= self.s.engine_min_score and not busy:
                     cands.append((c, f))
