@@ -133,6 +133,24 @@ def main() -> None:
         return False
     server.check_trading_key = no_key_check
 
+    async def no_restart():   # saving settings would restart the systemd engine; the demo has none
+        return None
+    server._need_systemd = lambda: None
+    server._restart_engine = no_restart
+
+    async def scripted_ask(s, history, effective, engine, copying, allow_apply=False):
+        """The strategy assistant without an LLM: «ریسک ...» halves the risk, anything else gets a proposal."""
+        q = history[-1]["content"]
+        if "ریسک" in q:
+            ch = {"engine_risk_per_trade_pct": 0.005}
+            return {"reply": "ریسک هر معامله نصف شد.", "proposal": {"changes": ch, "reasoning": "", "dropped": []},
+                    "apply": allow_apply}
+        ch = {"engine_breadth_gate_pct": 30.0}
+        return {"reply": "پیشنهاد: دروازه فراگیری را ۳۰٪ کنید.", "proposal": {"changes": ch, "reasoning": "", "dropped": []},
+                "apply": False}
+    from wallex_agent import strategy_chat
+    strategy_chat.ask = scripted_ask
+
     async def fng(days=30):
         return {"value": 52, "classification": "Neutral", "history": [{"date": "2026-10-23", "value": 52}]}
     sentiment.global_fear_greed = fng
