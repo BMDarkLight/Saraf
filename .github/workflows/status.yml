@@ -34,6 +34,23 @@ jobs:
           free -m; nproc; uptime
           systemctl list-units --no-pager --plain 'wallex-*' | head -20 || true
           journalctl -u wallex-engine --no-pager -n 40 --since "-6h" | grep -v '"event": "mark"' | tail -40 || true
+      - name: Web endpoints
+        run: |
+          for u in /api/strategy/tuning /api/personas /api/strategy; do
+            printf '%s ' "$u"; curl -s -o /tmp/status-body.json -w '%{http_code} %{time_total}s\n' "http://127.0.0.1:8000$u" || true
+            python3 - <<'PY' || true
+          import json
+          d = json.load(open("/tmp/status-body.json"))
+          if "personas" in d:
+              for p in d["personas"]:
+                  print("  ", p["id"], "active" if p["active"] else "inactive", "ret", p["return_pct"], "trades", p["trades"], "core", p["core"])
+              print("   copying:", d.get("copying"))
+          elif "params" in d:
+              print("   overrides:", d["overrides"], "live:", d["live"], "copying:", d["copying"])
+          else:
+              print("   return_pct:", d.get("return_pct"), "allocation:", d.get("allocation"), "curve points:", len(d.get("curve") or []))
+          PY
+          done
       - name: Engine report
         working-directory: /opt/wallex-agent/backend
         env:
