@@ -1,0 +1,13 @@
+{
+ "id": "cautious",
+ "days": 7.0,
+ "net_return_pct": 2.337,
+ "max_drawdown_pct": 1.973,
+ "trades": 5,
+ "win_rate_pct": 60.0,
+ "profit_factor": 6.37,
+ "fees_paid_tmn": 33160,
+ "window_end": "2026-10-23T12:00:00Z",
+ "decider": "rules",
+ "note": "Status run 39954923980 on the VPS; trades include the USDT core's exit slices"
+}
