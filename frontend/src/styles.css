@@ -865,3 +865,28 @@ table.diff td { padding: 6px; border-top: 1px solid var(--border-soft); unicode-
   .kpi-row .stat b { font-size: 14px; }
   .feed-row { grid-template-columns: 52px auto auto 1fr; }
 }
+
+/* on/off switch (engine card) */
+.switch { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--border); background: var(--surface-2);
+  border-radius: 999px; padding: 3px 12px 3px 3px; font-size: 12.5px; font-weight: 700; color: var(--muted); direction: ltr; }
+.switch .switch-knob { width: 22px; height: 22px; border-radius: 50%; background: var(--muted); transition: transform 0.18s, background-color 0.18s; }
+.switch.on { border-color: var(--up); color: var(--up); background: var(--up-soft); }
+.switch.on .switch-knob { background: var(--up); }
+.switch .switch-text { direction: rtl; }
+.switch:disabled { opacity: 0.6; }
+.paused-note { font-size: 12px; line-height: 1.8; background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 6px 10px; }
+.dt-ctl { display: flex; align-items: center; gap: 10px; }
+.dt-ctl input { border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; background: var(--surface); color-scheme: inherit; }
+
+/* strategy assistant: history + direct apply */
+.schat { position: relative; }
+.schat-h { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border-soft); }
+.schat-h .spacer { flex: 1; }
+.schat-h .count { background: var(--surface-2); border-radius: 999px; padding: 0 7px; font-size: 11px; margin-inline-start: 4px; }
+.schat-list { position: absolute; top: 52px; inset-inline: 10px; z-index: 5; max-height: min(420px, 70%); overflow: auto;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 12px 32px rgba(23, 29, 38, 0.18); }
+.proposal.applied { border-color: var(--up); }
+.proposal.applied .proposal-h { color: var(--up); }
+.proposal.undone { border-color: var(--border); opacity: 0.75; }
+.proposal.undone .proposal-h { color: var(--muted); }
+.switch.on { flex-direction: row-reverse; padding: 3px 3px 3px 12px; }

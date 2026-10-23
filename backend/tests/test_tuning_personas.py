@@ -69,6 +69,7 @@ def srv(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "STRATEGY_PROFILE_FILE", eng / "profile.env")
     monkeypatch.setattr(server, "TUNING_FILE", eng / "tuning.env")
     monkeypatch.setattr(server, "COPY_FILE", eng / "copy.json")
+    monkeypatch.setattr(server, "CONTROL_FILE", eng / "control.json")
     monkeypatch.setattr(server.shutil, "which", lambda name: "/bin/systemctl")
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     (eng / "mode.env").write_text("ENGINE_RUN_ARGS=--mode shadow\n")
@@ -145,3 +146,59 @@ async def test_chat_reads_a_tool_call_proposal(tmp_path, monkeypatch):
     r = await strategy_chat.ask(make_settings(tmp_path), [{"role": "user", "content": "more trades"}],
                                 {"engine_breadth_gate_pct": 25.0}, {}, None)
     assert r["reply"] and r["proposal"]["changes"] == {"engine_breadth_gate_pct": 15.0}
+
+
+def test_end_time_is_tunable_in_tehran_time_and_never_in_the_past():
+    assert tuning.validate({"engine_end_time": "2099-10-26T23:59:00+03:30"}) == {"engine_end_time": "2099-10-26T20:29:00Z"}
+    for bad in ("2020-01-01T00:00:00+03:30", "2099-10-26T23:59:00", "monday"):
+        with pytest.raises(tuning.TuningError):
+            tuning.validate({"engine_end_time": bad})
+    assert [p["key"] for p in tuning.PARAMS if p["group"] == "time"][:3] == [
+        "engine_end_time", "engine_no_entry_before_end_min", "engine_flatten_before_end_min"]
+
+
+def test_assistant_applies_changes_itself_saves_the_chat_and_can_undo(srv, monkeypatch):
+    calls = iter([
+        {"reply": "انجام شد.", "proposal": {"changes": {"engine_max_positions": 1, "engine_risk_per_trade_pct": 0.005},
+                                            "reasoning": "", "dropped": []}, "apply": True},
+        {"reply": "پیشنهاد:", "proposal": {"changes": {"engine_breadth_gate_pct": 30.0}, "reasoning": "", "dropped": []},
+         "apply": False},
+        {"reply": "انجام شد.", "proposal": {"changes": {"engine_max_positions": 3}, "reasoning": "", "dropped": []},
+         "apply": True},
+    ])
+    seen = {}
+
+    async def fake_ask(s, history, effective, engine, copying, allow_apply=False):
+        seen["allow"], seen["history"] = allow_apply, [m["content"] for m in history]
+        return next(calls)
+    monkeypatch.setattr(strategy_chat, "ask", fake_ask)
+    monkeypatch.setattr(srv.server.settings, "llm_api_key", "k")
+    monkeypatch.setattr(srv.server, "STRATEGY_CHATS", srv.tmp / "data/strategy_chats")
+    (srv.eng / "tuning.env").write_text("ENGINE_MAX_POSITIONS=2\n")
+    c = srv.c
+    r = c.post("/api/strategy/chat", json={"message": "ریسک را نصف کن و یک پوزیشن"}).json()
+    sid = r["session_id"]
+    assert seen["allow"] and r["message"]["applied"]["changes"]["engine_max_positions"] == 1
+    assert tuning.read_env(srv.eng / "tuning.env") == {"engine_max_positions": 1, "engine_risk_per_trade_pct": 0.005}
+    assert srv.calls[-1] == ("systemctl", "restart", "wallex-engine")
+    r2 = c.post("/api/strategy/chat", json={"message": "دروازه چطور؟", "session_id": sid, "allow_apply": False}).json()
+    assert "applied" not in r2["message"] and seen["history"] == ["ریسک را نصف کن و یک پوزیشن", "انجام شد.", "دروازه چطور؟"]
+    rows = c.get("/api/strategy/chats").json()
+    assert rows[0]["id"] == sid and rows[0]["turns"] == 2
+    assert c.post(f"/api/strategy/chats/{sid}/undo", json={"index": 3}).status_code == 400   # that one only proposed
+    assert c.post(f"/api/strategy/chats/{sid}/undo", json={"index": 1}).json()["ok"]
+    assert tuning.read_env(srv.eng / "tuning.env") == {"engine_max_positions": 2}
+    assert c.get(f"/api/strategy/chats/{sid}").json()["messages"][1]["undone"]
+    (srv.eng / "mode.env").write_text("ENGINE_RUN_ARGS=--mode live --confirm-live\n")       # live: needs the confirmation
+    r3 = c.post("/api/strategy/chat", json={"message": "و حالا؟", "session_id": sid}).json()
+    assert "applied" not in r3["message"] and "LIVE" in r3["message"]["apply_error"]   # nothing changed without it
+    assert c.delete(f"/api/strategy/chats/{sid}").json()["ok"] and c.get("/api/strategy/chats").json() == []
+
+
+def test_engine_switch_pauses_freely_but_turning_on_live_needs_confirmation(srv):
+    c = srv.c
+    assert c.post("/api/engine/switch", json={"on": False}).json() == {"ok": True, "on": False}
+    (srv.eng / "mode.env").write_text("ENGINE_RUN_ARGS=--mode live --confirm-live\n")
+    c.post("/api/engine/switch", json={"on": False})
+    assert c.post("/api/engine/switch", json={"on": True}).status_code == 400 and srv.server.engine_paused()
+    assert c.post("/api/engine/switch", json={"on": True, "confirm": "LIVE"}).json()["on"]

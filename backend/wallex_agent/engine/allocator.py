@@ -104,6 +104,8 @@ class CoreAllocator:
 
     async def _accumulate(self, now: float, rate: float) -> None:
         st = self.st
+        if self.e.paused():   # switched off: hold what there is, buy no more USDT
+            return
         tmn = await self.e.broker.holding("TMN")
         amount = tmn - self.s.engine_core_tmn_reserve
         if amount < await self._min_tmn() * 1.2:

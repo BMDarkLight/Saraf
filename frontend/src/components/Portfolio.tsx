@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getJSON } from "../api";
 import { compact, pct, price, tone } from "../format";
-import { countdown, Sparkline, useNow } from "./strategy/common";
+import { ConfirmDialog, countdown, postJSON, Sparkline, useNow } from "./strategy/common";
 import { CORE_FA, REGIME_FA } from "./strategy/Overview";
 import type { StrategyTab } from "./strategy/StrategyPage";
 
@@ -45,7 +45,7 @@ export function Portfolio({ refreshKey, assistantLive, onOpenStrategy }: {
   return (
     <>
       <AccountCard acc={acc} capital={strat?.engine?.capital_tmn ?? 5_000_000} />
-      <EngineCard d={strat} onOpen={onOpenStrategy} />
+      <EngineCard d={strat} onOpen={onOpenStrategy} onChanged={() => getJSON("/api/strategy").then(setStrat).catch(() => {})} />
       {!assistantLive && (
         <button className="link-btn" onClick={() => setShowPaper(!showPaper)}>
           {showPaper ? "بستن حساب آزمایشی چت" : "حساب آزمایشی چت (کاغذی)"}
@@ -118,10 +118,41 @@ function AccountCard({ acc, capital }: { acc: any; capital: number }) {
   );
 }
 
-function EngineCard({ d, onOpen }: { d: any; onOpen: (tab: StrategyTab) => void }) {
+/** On/off for the strategy. Off pauses new entries and USDT buys at once; open positions keep their stops and targets
+ *  and the end-of-challenge sell-off still runs. On again in live mode asks first (it trades real money). */
+function EngineSwitch({ on, live, onChanged }: { on: boolean; live: boolean; onChanged: () => void }) {
+  const [ask, setAsk] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const flip = async (to: boolean) => {
+    setBusy(true); setErr("");
+    try {
+      await postJSON("/api/engine/switch", { on: to, confirm: to && live ? "LIVE" : "" });
+      setAsk(false);
+      onChanged();
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <button role="switch" aria-checked={on} aria-label="روشن/خاموش کردن استراتژی" disabled={busy}
+              className={`switch ${on ? "on" : ""}`} onClick={() => (on ? flip(false) : live ? setAsk(true) : flip(true))}>
+        <span className="switch-knob" /><span className="switch-text">{on ? "روشن" : "خاموش"}</span>
+      </button>
+      {ask && (
+        <ConfirmDialog title="روشن کردن استراتژی" danger busy={busy} error={err} okLabel="بله، روشن شود"
+                       onOk={() => flip(true)} onCancel={() => { setAsk(false); setErr(""); }}>
+          <p>موتور دوباره با پول واقعی خرید می‌کند (ورودهای جدید و تبدیل تومان به تتر).</p>
+        </ConfirmDialog>
+      )}
+    </>
+  );
+}
+
+function EngineCard({ d, onOpen, onChanged }: { d: any; onOpen: (tab: StrategyTab) => void; onChanged: () => void }) {
   const now = useNow(30000);
   const e = d?.engine;
   if (!e) return null;
+  const on = !d.paused;
   const end = d.end_time ? Date.parse(d.end_time) : null;
   const curve: [number, number][] = (d.curve ?? []).map((r: any) => [r.t, r.equity]);
   const gateOpen = e.regime !== "risk_off";
@@ -131,9 +162,11 @@ function EngineCard({ d, onOpen }: { d: any; onOpen: (tab: StrategyTab) => void 
         موتور خودکار
         <span className={`chip mode ${d.mode === "live" ? "live" : ""}`}><span className="dot" />{d.mode === "live" ? "زنده" : "شبیه‌سازی"}</span>
         <span className="spacer" />
-        <button className="btn ghost sm" onClick={() => onOpen("overview")}>جزئیات</button>
+        <EngineSwitch on={on} live={d.mode === "live"} onChanged={onChanged} />
       </div>
       <div className="card-b eng-mini">
+        {!on && <div className="paused-note">خاموش: خرید جدیدی انجام نمی‌شود؛ پوزیشن‌های باز با حد ضرر و سود خود مدیریت می‌شوند
+          و فروش پایانی به تومان انجام می‌شود.</div>}
         <div className="eng-line">
           <span>{d.quote === "USDT" ? CORE_FA[e.core?.status] ?? "—" : "بازارهای تومانی"}</span>
           <span className="sep">·</span>
@@ -151,6 +184,7 @@ function EngineCard({ d, onOpen }: { d: any; onOpen: (tab: StrategyTab) => void 
         ))}
         {!e.positions?.length && <div className="muted small">پوزیشن بازی ندارد · {e.stats?.trades ?? 0} معامله بسته‌شده</div>}
         <div className="ssum-links">
+          <button className="chip-t" onClick={() => onOpen("overview")}>جزئیات</button>
           <button className="chip-t" onClick={() => onOpen("tune")}>تنظیمات</button>
           <button className="chip-t" onClick={() => onOpen("personas")}>کپی‌تریدینگ</button>
           <button className="chip-t" onClick={() => onOpen("chat")}>دستیار</button>

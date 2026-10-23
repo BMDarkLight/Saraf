@@ -41,16 +41,16 @@ PARAMS: list[dict[str, Any]] = [
      "label": "حداقل نوسان (ATR٪)"},
     {"key": "engine_universe_size", "type": "int", "min": 3, "max": 20, "step": 1, "group": "entry",
      "label": "تعداد بازارهای پایش‌شده"},
-    {"key": "engine_cooldown_bars", "type": "int", "min": 0, "max": 16, "step": 1, "group": "entry",
+    {"key": "engine_cooldown_bars", "type": "int", "min": 0, "max": 16, "step": 1, "group": "time",
      "label": "استراحت بعد از خروج (کندل)"},
     # --- execution and exits
     {"key": "engine_execution", "type": "choice", "choices": ["maker", "taker"], "group": "exec",
      "label": "نوع سفارش", "help": "maker: سفارش محدود روی بهترین قیمت؛ taker: سفارش بازار"},
     {"key": "engine_entry_chase_atr", "type": "float", "min": 0.05, "max": 1.0, "step": 0.05, "group": "exec",
      "label": "لغو ورود اگر قیمت فرار کرد (ATR)"},
-    {"key": "engine_entry_timeout_bars", "type": "int", "min": 1, "max": 8, "step": 1, "group": "exec",
+    {"key": "engine_entry_timeout_bars", "type": "int", "min": 1, "max": 8, "step": 1, "group": "time",
      "label": "مهلت پرشدن سفارش ورود (کندل)"},
-    {"key": "engine_time_stop_bars", "type": "int", "min": 8, "max": 96, "step": 4, "group": "exec",
+    {"key": "engine_time_stop_bars", "type": "int", "min": 8, "max": 96, "step": 4, "group": "time",
      "label": "توقف زمانی (کندل ۱۵ دقیقه)"},
     # --- AI
     {"key": "engine_decider", "type": "choice", "choices": ["ai", "rules"], "group": "ai",
@@ -61,18 +61,51 @@ PARAMS: list[dict[str, Any]] = [
     {"key": "engine_core_enabled", "type": "bool", "group": "core", "label": "هسته تتری"},
     {"key": "engine_core_guard_pct", "type": "pct", "min": 0.02, "max": 0.15, "step": 0.01, "group": "core",
      "label": "محافظ تتر", "help": "افت تتر/تومان از اوج که هسته را به تومان می‌برد"},
-    {"key": "engine_core_exit_hours", "type": "float", "min": 1.0, "max": 24.0, "step": 1.0, "group": "core",
+    {"key": "engine_core_exit_hours", "type": "float", "min": 1.0, "max": 24.0, "step": 1.0, "group": "time",
      "label": "پنجره خروج پایانی (ساعت)"},
-    {"key": "engine_core_exit_slices", "type": "int", "min": 1, "max": 6, "step": 1, "group": "core",
+    {"key": "engine_core_exit_slices", "type": "int", "min": 1, "max": 6, "step": 1, "group": "time",
      "label": "تعداد بخش‌های فروش تتر"},
     {"key": "engine_final_sweep", "type": "bool", "group": "core", "label": "فروش همه رمزارزها در پایان چالش"},
 ]
+PARAMS += [
+    # --- timings (the challenge window and the schedule around it); the bar-based ones are 15-minute bars
+    {"key": "engine_end_time", "type": "datetime", "group": "time", "label": "پایان چالش",
+     "help": "همه چیز پیش از این زمان به تومان فروخته می‌شود (به وقت تهران وارد کنید)"},
+    {"key": "engine_no_entry_before_end_min", "type": "int", "min": 0, "max": 1440, "step": 15, "group": "time",
+     "label": "توقف خرید جدید پیش از پایان (دقیقه)"},
+    {"key": "engine_flatten_before_end_min", "type": "int", "min": 15, "max": 240, "step": 5, "group": "time",
+     "label": "فروش همه چیز پیش از پایان (دقیقه)"},
+    {"key": "engine_pause_hours", "type": "float", "min": 1.0, "max": 48.0, "step": 1.0, "group": "time",
+     "label": "مدت توقف خرید پس از افت (ساعت)"},
+]
+for _p in PARAMS:   # order the timing group: window first, then the bar-based timers
+    _p.setdefault("order", ["engine_end_time", "engine_no_entry_before_end_min", "engine_flatten_before_end_min",
+                            "engine_core_exit_hours", "engine_core_exit_slices", "engine_pause_hours",
+                            "engine_time_stop_bars", "engine_entry_timeout_bars", "engine_cooldown_bars"].index(_p["key"])
+                   if _p["group"] == "time" else 0)
+PARAMS.sort(key=lambda p: (p["group"] != "time", p["order"]) if p["group"] == "time" else (True, 0))
 BY_KEY = {p["key"]: p for p in PARAMS}
-GROUPS = {"risk": "اندازه و ریسک", "entry": "ورود", "exec": "اجرا و خروج", "ai": "هوش مصنوعی", "core": "هسته تتری و پایان"}
+GROUPS = {"time": "زمان‌بندی", "risk": "اندازه و ریسک", "entry": "ورود", "exec": "اجرا و خروج", "ai": "هوش مصنوعی",
+          "core": "هسته تتری"}
 
 
 class TuningError(ValueError):
     pass
+
+
+def _utc_iso(raw: Any) -> str:
+    """An ISO time with a UTC offset (e.g. 2026-10-26T23:59:00+03:30) -> '2026-10-26T20:29:00Z'."""
+    from datetime import datetime, timezone
+    try:
+        t = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
+    except ValueError:
+        raise TuningError(f"{raw!r} is not an ISO date-time")
+    if t.tzinfo is None:
+        raise TuningError("the end time needs a UTC offset, e.g. +03:30 for Tehran")
+    import time as _time
+    if t.timestamp() < _time.time() + 3600:   # a past end would sell everything to TMN at once and stop the engine
+        raise TuningError("the end time must be at least an hour from now")
+    return t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def validate(values: dict[str, Any]) -> dict[str, Any]:
@@ -85,7 +118,9 @@ def validate(values: dict[str, Any]) -> dict[str, Any]:
             raise TuningError(f"{key} is not tunable")
         t = p["type"]
         try:
-            if t == "bool":
+            if t == "datetime":
+                v = _utc_iso(raw)
+            elif t == "bool":
                 v: Any = raw if isinstance(raw, bool) else str(raw).strip().lower() in ("1", "true", "yes", "on")
             elif t == "int":
                 v = int(raw)

@@ -49,13 +49,17 @@ class Engine:
     REGIME_EVERY_S = 4 * 3600
     REVIEW_EVERY_BARS = 4
 
-    def __init__(self, settings: Settings, feed, broker, decider, journal: Journal, state_path: Path | None = None):
+    def __init__(self, settings: Settings, feed, broker, decider, journal: Journal, state_path: Path | None = None,
+                 control_path: Path | None = None):
         self.s, self.feed, self.broker, self.decider, self.journal = settings, feed, broker, decider, journal
         self.risk = RiskManager(settings)
         self.tf = settings.engine_timeframe_min
         self.setups = tuple(x.strip() for x in settings.engine_setups.split(",") if x.strip())
         self.end_ts = parse_end(settings.engine_end_time)
         self.state_path = state_path
+        # the UI's on/off switch (data/engine/control.json, main engine only): off = no new entries and no new USDT
+        # buys; exits, stops, the core guard and the end-of-challenge flatten keep running
+        self.control_path = control_path
         self.state = {"positions": {}, "peak": settings.engine_capital_tmn, "pause_until": 0.0, "halted": False,
                       "cooldown": {}, "regime": "neutral", "regime_reason": "", "regime_at": 0.0,
                       "seq": 0, "bars": 0, "flattened": False, "closed": [], "pending": {}}
@@ -68,6 +72,14 @@ class Engine:
         self.core = CoreAllocator(self) if self.quote == "USDT" and settings.engine_core_enabled else None
 
     # ---------------------------------------------------------------- utils
+    def paused(self) -> bool:
+        if not self.control_path:
+            return False
+        try:
+            return bool(json.loads(self.control_path.read_text()).get("paused"))
+        except (OSError, ValueError):
+            return False
+
     def save(self) -> None:
         if self.state_path:
             tmp = self.state_path.with_suffix(".tmp")
@@ -242,7 +254,8 @@ class Engine:
             now=now, equity=eq, peak=self.state["peak"], n_positions=len(self.positions) + len(self.pending),
             regime=self.state["regime"], pause_until=self.state["pause_until"], halted=self.state["halted"],
             end_ts=self.end_ts, cooldown_until=self.state["cooldown"].get(cand.symbol, 0))
-        block = block or (self.core and self.core.blocks_entries())
+        block = block or ("paused by the user (strategy switch off)" if self.paused() else None) \
+            or (self.core and self.core.blocks_entries())
         if block:
             self.journal.log("risk_block", now, symbol=cand.symbol, setup=cand.setup, reason=block, candidate=cand.dict())
             return

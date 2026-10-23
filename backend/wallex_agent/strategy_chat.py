@@ -18,8 +18,16 @@ from .tuning import BY_KEY, PARAMS, TuningError, validate
 
 SYSTEM = """You are the strategy assistant of an autonomous trading engine on the Wallex exchange (Iran).
 The person running it chats with you about the strategy. Answer in Persian (Farsi), briefly and concretely
-(at most ~6 short sentences or a short list). You may PROPOSE changes to the tunable parameters below by calling
-the `propose_changes` tool; the person reviews the diff and applies it themselves. Never claim you changed anything.
+(at most ~6 short sentences or a short list). You can change the tunable parameters below with two tools:
+- `apply_changes`: sets them NOW (the engine restarts with them). Use it whenever the person asks you to set, change,
+  apply, raise, lower, turn on/off or "dial" something, or confirms a proposal ("yes", "do it", "apply"). Include
+  EVERY parameter the request implies, all at once; you may change any number of them.
+- `propose_changes`: only a suggestion shown as a diff, when the person asks for advice or options without asking you
+  to make the change.
+If `apply_changes` is not available, applying is switched off in the UI: propose instead and say so. Never claim a
+change happened unless you called `apply_changes`; the tool result tells you what was applied.
+Times: the person is in Tehran (UTC+03:30). engine_end_time takes ISO-8601 with an offset, e.g.
+2026-10-26T23:59:00+03:30. Bar-based timers count 15-minute bars (4 bars = 1 hour).
 
 HOW THE STRATEGY WORKS
 - The challenge scores realized TMN return on 5,000,000 TMN of spot trade credit (no leverage), plus drawdown,
@@ -42,20 +50,24 @@ HOW THE STRATEGY WORKS
 Be honest about trade-offs: more trades usually means more fees and drawdown here. If an idea cannot be expressed
 with these parameters, say so and suggest the closest thing. Only propose keys from the list, within bounds."""
 
-TOOL = {"type": "function", "function": {
-    "name": "propose_changes",
-    "description": "Propose new values for some tunable strategy parameters. The person reviews and applies them.",
-    "parameters": {"type": "object", "properties": {
-        "changes": {"type": "object", "description": "parameter key -> new value (only keys from the list)"},
-        "reasoning": {"type": "string", "description": "one or two sentences in Persian: why these values"},
-    }, "required": ["changes", "reasoning"]},
-}}
+def _tool(name: str, description: str) -> dict:
+    return {"type": "function", "function": {"name": name, "description": description, "parameters": {
+        "type": "object", "properties": {
+            "changes": {"type": "object", "description": "parameter key -> new value (only keys from the list)"},
+            "reasoning": {"type": "string", "description": "one or two sentences in Persian: why these values"},
+        }, "required": ["changes", "reasoning"]}}}
+
+
+TOOL = _tool("propose_changes", "Suggest new values for tunable parameters; the person decides whether to apply them.")
+APPLY_TOOL = _tool("apply_changes", "Set tunable parameters now (the engine restarts with them). Use when asked to change "
+                                    "settings or when the person confirms a proposal.")
 
 
 def _params_block(effective: dict[str, Any]) -> str:
     rows = []
     for p in PARAMS:
         bounds = (f"{p['min']}..{p['max']}" if "min" in p else
+                  "ISO-8601 with offset" if p["type"] == "datetime" else
                   f"one of {p['choices']}" if p["type"] == "choice" else
                   f"comma list from {p['choices']}" if p["type"] == "multi" else "true/false")
         rows.append(f"- {p['key']} = {effective.get(p['key'])!r}  ({p['type']}, {bounds}) {p['label']}")
@@ -99,25 +111,32 @@ def _proposal(raw: Any, effective: dict) -> dict | None:
     return {"changes": ok, "reasoning": str(raw.get("reasoning") or ""), "dropped": dropped}
 
 
-async def ask(s: Settings, history: list[dict], effective: dict, engine: dict, copying: str | None) -> dict:
+async def ask(s: Settings, history: list[dict], effective: dict, engine: dict, copying: str | None,
+              allow_apply: bool = False) -> dict:
+    """One assistant turn. Returns {"reply", "proposal", "apply"}: `apply` is True when the model asked to apply the
+    proposal now (only offered when allow_apply); the caller applies it and may tell the model the outcome."""
     llm = AsyncOpenAI(base_url=s.llm_base_url, api_key=s.llm_api_key or "missing")
     extra = json.loads(s.engine_llm_extra_body) if s.engine_llm_extra_body.strip() else None
     kwargs: dict[str, Any] = dict(model=s.llm_model, messages=build_messages(history, effective, engine, copying),
                                   temperature=0.3, max_completion_tokens=900)
     if not s.llm_compat_schemas:
-        kwargs["tools"] = [TOOL]
+        kwargs["tools"] = [TOOL, APPLY_TOOL] if allow_apply else [TOOL]
     if extra:
         kwargs["extra_body"] = extra
     resp = await llm.chat.completions.create(**kwargs)
     msg = resp.choices[0].message
     text = msg.content or ""
-    proposal = None
+    proposal, apply = None, False
     for call in msg.tool_calls or []:
-        if call.function.name == "propose_changes":
+        if call.function.name in ("propose_changes", "apply_changes"):
             try:
-                proposal = _proposal(json.loads(call.function.arguments or "{}"), effective)
+                p = _proposal(json.loads(call.function.arguments or "{}"), effective)
             except ValueError:
-                pass
+                continue
+            if p:
+                proposal = p if proposal is None else {**proposal, "changes": {**proposal["changes"], **p["changes"]},
+                                                       "dropped": proposal["dropped"] + p["dropped"]}
+                apply = apply or (call.function.name == "apply_changes" and allow_apply)
     if proposal is None:   # models without tool calls: a JSON object with "changes" in the text
         m = re.search(r"\{[\s\S]*\"changes\"[\s\S]*\}", text)
         if m:
@@ -128,4 +147,4 @@ async def ask(s: Settings, history: list[dict], effective: dict, engine: dict, c
                 pass
     if not text and proposal:
         text = proposal["reasoning"]
-    return {"reply": text.strip() or "…", "proposal": proposal}
+    return {"reply": text.strip() or "…", "proposal": proposal, "apply": bool(apply and proposal and proposal["changes"])}

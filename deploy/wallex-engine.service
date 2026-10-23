@@ -10,10 +10,10 @@ EnvironmentFile=/opt/wallex-agent/.env
 EnvironmentFile=-/opt/wallex-agent/data/engine/mode.env
 # the strategy card's real-mode switch copies deploy/strategy.env here (absent = default TMN-market settings)
 EnvironmentFile=-/opt/wallex-agent/data/engine/profile.env
-# settings saved from the strategy card's tuning tab or by copying a persona (wallex_agent/tuning.py)
-EnvironmentFile=-/opt/wallex-agent/data/engine/tuning.env
-# the challenge window (deploy/challenge.env, tracked in git) is loaded last so a push can move it
+# the challenge window (deploy/challenge.env, tracked in git): a push can move it...
 EnvironmentFile=-/opt/wallex-agent/deploy/challenge.env
+# ...and settings saved in the UI (strategy tuning, persona copy, the strategy assistant) override it: tuning.py
+EnvironmentFile=-/opt/wallex-agent/data/engine/tuning.env
 Environment=PYTHONUNBUFFERED=1 TZ=UTC
 # ENGINE_RUN_ARGS lives in the server's .env: "--mode shadow", or "--mode live --confirm-live" for the challenge
 ExecStart=/root/.local/bin/uv run --no-dev python -m wallex_agent.engine run $ENGINE_RUN_ARGS

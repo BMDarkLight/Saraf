@@ -600,6 +600,7 @@ async def strategy():
         "allocation": {"satellite_tmn": round(managed + pending),
                        "other_coins_tmn": round(max(0.0, exposure - managed - pending))},
         "mode": start.get("mode") or mode, "run": mode, "engine": eng, "strategy_live": strategy_is_live(),
+        "paused": engine_paused(),
         "live_at": strategy_live_at(), "quote": cfg.get("engine_quote", "TMN"), "started": start.get("time"),
         "end_time": cfg.get("engine_end_time") or settings.engine_end_time or None,
         "params": {k.removeprefix("engine_"): cfg.get(k) for k in (
@@ -782,20 +783,149 @@ async def stop_copy(body: CopyIn):
     return {"ok": True}
 
 
+# Strategy-assistant conversations, one JSON file each: {"id", "title", "updated", "messages": [...]}.
+STRATEGY_CHATS = ROOT / "data" / "strategy_chats"
+
+
+def _chat_path(cid: str) -> Path:
+    if not cid.replace("-", "").isalnum():
+        raise HTTPException(400, "bad conversation id")
+    return STRATEGY_CHATS / f"{cid}.json"
+
+
+def _load_chat(cid: str) -> dict:
+    try:
+        return json.loads(_chat_path(cid).read_text())
+    except OSError:
+        raise HTTPException(404, "no such conversation")
+
+
+def _save_chat(chat: dict) -> None:
+    STRATEGY_CHATS.mkdir(parents=True, exist_ok=True)
+    chat["updated"] = time.time()
+    _chat_path(chat["id"]).write_text(json.dumps(chat, ensure_ascii=False))
+
+
+@app.get("/api/strategy/chats")
+async def list_strategy_chats():
+    rows = []
+    for f in sorted(STRATEGY_CHATS.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)[:50] \
+            if STRATEGY_CHATS.exists() else []:
+        with contextlib.suppress(ValueError, OSError):
+            c = json.loads(f.read_text())
+            rows.append({"id": c["id"], "title": c.get("title", ""), "updated": c.get("updated"),
+                         "turns": sum(1 for m in c.get("messages", []) if m.get("role") == "user")})
+    return rows
+
+
+@app.get("/api/strategy/chats/{cid}")
+async def get_strategy_chat(cid: str):
+    return _load_chat(cid)
+
+
+@app.delete("/api/strategy/chats/{cid}")
+async def delete_strategy_chat(cid: str):
+    _chat_path(cid).unlink(missing_ok=True)
+    return {"ok": True}
+
+
+CONTROL_FILE = ROOT / "data" / "engine" / "control.json"   # the engine's on/off switch, read every bar and tick
+
+
+def engine_paused() -> bool:
+    try:
+        return bool(json.loads(CONTROL_FILE.read_text()).get("paused"))
+    except (OSError, ValueError):
+        return False
+
+
+class PauseIn(BaseModel):
+    on: bool               # True = trading on, False = paused
+    confirm: str = ""      # turning it back on in live mode trades real money: "LIVE"
+
+
+@app.post("/api/engine/switch")
+async def engine_switch(body: PauseIn):
+    """Off pauses new entries and USDT buys (exits, stops and the final sell-off continue); no restart needed."""
+    if body.on:
+        _check_live_confirm(body.confirm)
+    CONTROL_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CONTROL_FILE.write_text(json.dumps({"paused": not body.on, "at": time.time()}))
+    return {"ok": True, "on": not engine_paused()}
+
+
 class StrategyChatIn(BaseModel):
-    messages: list[dict]
+    message: str
+    session_id: str | None = None
+    allow_apply: bool = True     # the assistant may set parameters itself when asked (undo is one click)
+    confirm: str = ""            # "LIVE" when the engine trades real money
+
+
+async def _apply_overrides(values: dict, confirm: str, source: str) -> dict:
+    """Merge validated overrides into tuning.env and restart the engine. Returns the overrides before the change."""
+    before = tuning.read_env(TUNING_FILE)
+    merged = {**before, **tuning.validate(values)}
+    tuning.validate(merged)
+    _check_live_confirm(confirm)
+    _need_systemd()
+    _write_tuning(merged)
+    cp = copying()
+    if cp:
+        COPY_FILE.write_text(json.dumps({**cp, "modified": True}, ensure_ascii=False))
+    await _restart_engine()
+    return before
 
 
 @app.post("/api/strategy/chat")
 async def chat_strategy(body: StrategyChatIn):
     if not settings.llm_api_key:
         raise HTTPException(400, "LLM_API_KEY is not set")
+    chat = _load_chat(body.session_id) if body.session_id else {
+        "id": f"{int(time.time())}-{os.urandom(3).hex()}", "title": body.message.strip()[:60], "messages": []}
+    chat["messages"].append({"role": "user", "content": body.message.strip(), "time": time.time()})
     cp = copying()
+    effective = effective_settings()
     try:
-        return await strategy_chat.ask(settings, body.messages, effective_settings(), _engine_brief(),
-                                       cp.get("name") if cp else None)
+        r = await strategy_chat.ask(settings, chat["messages"], effective, _engine_brief(), cp.get("name") if cp else None,
+                                    allow_apply=body.allow_apply)
     except Exception as e:   # provider errors (budget, timeout) are shown in the chat, not as a 500
         raise HTTPException(502, f"LLM: {type(e).__name__}: {str(e)[:300]}")
+    msg = {"role": "assistant", "content": r["reply"], "proposal": r["proposal"], "time": time.time()}
+    if r["apply"]:
+        try:
+            msg["applied"] = {"changes": r["proposal"]["changes"],
+                              "before": {k: effective.get(k) for k in r["proposal"]["changes"]},
+                              "previous_overrides": await _apply_overrides(r["proposal"]["changes"], body.confirm, "assistant")}
+        except HTTPException as e:
+            msg["apply_error"] = e.detail
+        except tuning.TuningError as e:
+            msg["apply_error"] = str(e)
+    chat["messages"].append(msg)
+    _save_chat(chat)
+    return {"session_id": chat["id"], "message": msg}
+
+
+class UndoIn(BaseModel):
+    index: int
+    confirm: str = ""
+
+
+@app.post("/api/strategy/chats/{cid}/undo")
+async def undo_strategy_change(cid: str, body: UndoIn):
+    """Put the saved overrides back as they were before the assistant applied message `index`."""
+    chat = _load_chat(cid)
+    try:
+        msg = chat["messages"][body.index]
+        prev = msg["applied"]["previous_overrides"]
+    except (IndexError, KeyError, TypeError):
+        raise HTTPException(400, "that message did not apply anything")
+    _check_live_confirm(body.confirm)
+    _need_systemd()
+    _write_tuning(tuning.validate(prev) if prev else {})
+    await _restart_engine()
+    msg["undone"] = time.time()
+    _save_chat(chat)
+    return {"ok": True}
 
 
 @app.get("/api/alerts")

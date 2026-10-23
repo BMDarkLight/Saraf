@@ -493,3 +493,19 @@ def test_dip_threshold_can_scale_with_volatility():
     c = strategy.candidates("BTCUSDT", f, 0.1, 4.0, dip_atr=3.0)                 # but it is 4 ATRs on a calm market
     assert [x.setup for x in c] == ["dip_in_uptrend"] and 0.45 <= c[0].score <= 1.0
     assert not strategy.candidates("BTCUSDT", {**f, "ret_4": -0.3}, 0.1, 4.0, dip_atr=3.0)
+
+
+async def test_strategy_switch_off_pauses_entries_and_usdt_buys_but_not_exits(tmp_path):
+    control = tmp_path / "control.json"
+    control.write_text('{"paused": true}')
+    engine, broker, feed = usdt_engine(tmp_path, line(273_000, 274_000), CoreDecider(core="WAIT"),
+                                       aaa=synth(start=1.0, crash_at=3 * 1440 + 300))
+    engine.control_path = control
+    await run(engine, feed, T0 + 3 * 86_400, T0 + 4 * 86_400 - 60)
+    events = [json.loads(l) for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines()]
+    assert broker.cash_by["USDT"] == 0 and not any(e["event"] in ("entry", "entry_order", "core") for e in events)
+    assert any(e["event"] == "risk_block" and "paused" in e["reason"] for e in events)
+    control.write_text('{"paused": false}')                       # back on: the core converts on the next tick
+    feed.t += 60
+    await engine.monitor()
+    assert broker.cash_by["USDT"] > 0

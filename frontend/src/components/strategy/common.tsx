@@ -28,8 +28,19 @@ export function useNow(ms = 1000): number {
 }
 
 /** A value in the engine's units, as a person reads it: fractions as %, booleans as on/off. */
+/** UTC ISO <-> the value of a datetime-local input in Tehran time (UTC+03:30, no DST since 2022). */
+const TEHRAN_MS = 3.5 * 3.6e6;
+export const toTehranInput = (iso: string) => iso ? new Date(Date.parse(iso) + TEHRAN_MS).toISOString().slice(0, 16) : "";
+export const fromTehranInput = (v: string) => (v ? `${v}:00+03:30` : "");
+export function tehran(iso: string): string {
+  const t = Date.parse(iso);
+  return isNaN(t) ? iso : new Date(t).toLocaleString("fa-IR", { timeZone: "Asia/Tehran", weekday: "long", month: "long",
+    day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 export function fmtParam(p: any, v: any): string {
   if (v == null || v === "") return p?.type === "multi" ? "هیچ" : "—";
+  if (p?.type === "datetime") return tehran(String(v));
   if (p?.type === "pct") return `${+(v * 100).toFixed(2)}٪`;
   if (p?.type === "bool") return v ? "روشن" : "خاموش";
   if (p?.type === "multi") return String(v).split(",").filter(Boolean).map((x) => SETUP_FA[x] ?? x).join("، ");

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { getJSON } from "../../api";
-import { CHOICE_FA, ConfirmDialog, fmtParam, postJSON, SETUP_FA } from "./common";
+import { CHOICE_FA, ConfirmDialog, fmtParam, fromTehranInput, postJSON, SETUP_FA, toTehranInput } from "./common";
 
 /** Every tunable engine setting, grouped, with its bounds. Edits stay local until saved; saving writes
  *  data/engine/tuning.env and restarts the engine (with a real-money confirmation in live mode). */
@@ -102,6 +102,17 @@ function Field({ p, value, saved, overridden, onChange }: { p: any; value: any; 
 }
 
 function Control({ id, p, value, onChange }: { id: string; p: any; value: any; onChange: (v: any) => void }) {
+  if (p.type === "datetime") {
+    // edited in Tehran time; sent with its +03:30 offset and stored by the server in UTC
+    const shown = String(value ?? "").includes("+") ? String(value).slice(0, 16) : toTehranInput(String(value ?? ""));
+    return (
+      <div className="dt-ctl">
+        <input id={id} type="datetime-local" className="num" value={shown}
+               onChange={(e) => e.target.value && onChange(fromTehranInput(e.target.value))} />
+        <span className="muted small">به وقت تهران</span>
+      </div>
+    );
+  }
   if (p.type === "bool") {
     return (
       <button id={id} role="switch" aria-checked={!!value} className={`toggle ${value ? "on" : ""}`} onClick={() => onChange(!value)}>

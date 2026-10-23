@@ -50,7 +50,7 @@ async def run_engine(s: Settings, mode: str, confirm_live: bool = False, max_loo
     journal = Journal(out, echo=True)
     fee = PAPER_FEE if mode != "live" else s.maker_fee
     engine = Engine(s, LiveFeed(client, s), SpotExec(spot, fee, quote=s.engine_quote), make_decider(s, s.engine_decider), journal,
-                    state_path=out / "state.json")
+                    state_path=out / "state.json", control_path=None if name else out.parent / "control.json")
     await engine.reconcile()
     snapshot = {k: v for k, v in s.model_dump(mode="json").items() if k.startswith(("engine_", "llm_")) and k not in SECRET_FIELDS}
     journal.log("start", engine.feed.now(), mode=mode, name=name or mode, commit=git_commit(), config=snapshot)
