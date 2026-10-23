@@ -18,6 +18,7 @@ from collections import Counter
 from pathlib import Path
 
 from wallex_agent.brokers import LiveSpotBroker
+from wallex_agent.brokers.base import safe_float
 from wallex_agent.config import ROOT, get_settings
 from wallex_agent.wallex import WallexClient
 
@@ -90,8 +91,13 @@ def report_run(d: Path, n_events: int) -> None:
         for t in trades[-10:]:
             print("  ", {k: t[k] for k in ("trade_id", "symbol", "setup", "entry_time", "exit_time", "cost_tmn", "pnl_tmn",
                                           "pnl_pct", "exit_reason")})
+    key = [e for e in events if e["event"] in ("start", "core", "entry", "entry_order", "entry_cancelled", "exit",
+                                               "error", "circuit_breaker", "reconcile", "stop")]
+    print(f"--- key events in the journal tail: {dict(Counter(e['event'] for e in key))}; newest 40 ---")
+    for e in key[-40:]:
+        print(brief(e))
     print(f"--- newest {n_events} events (oldest first) ---")
-    for e in [e for e in since if e["event"] not in ("start",)][-n_events:]:
+    for e in events[-n_events:]:
         print(brief(e))
 
 
@@ -104,11 +110,11 @@ async def market_facts() -> None:
         print("\n================ market ================")
         print("USDTTMN stats:", {k: u.get("stats", {}).get(k) for k in ("bidPrice", "askPrice", "lastPrice", "24h_ch")},
               "minNotional", u.get("minNotional"))
-        usdt = [(float(v.get("stats", {}).get("24h_quoteVolume") or 0), k, v.get("minNotional"))
+        usdt = [(safe_float(v.get("stats", {}).get("24h_quoteVolume")), k, v.get("minNotional"))
                 for k, v in m.items() if v.get("quoteAsset") == "USDT"]
         print("top USDT markets (volume, symbol, minNotional):", sorted(usdt, reverse=True)[:8])
-        ch = [float(v.get("stats", {}).get("24h_ch") or 0) for v in m.values() if v.get("quoteAsset") == "USDT"
-              and float(v.get("stats", {}).get("24h_quoteVolume") or 0) > 0]
+        ch = [safe_float(v.get("stats", {}).get("24h_ch")) for v in m.values() if v.get("quoteAsset") == "USDT"
+              and safe_float(v.get("stats", {}).get("24h_quoteVolume")) > 0]
         if ch:
             print(f"USDT-market breadth: {100 * sum(x > 0 for x in ch) / len(ch):.1f}% of {len(ch)} up over 24h")
         if s.wallex_api_key:
@@ -119,7 +125,10 @@ async def market_facts() -> None:
                 print("fees error:", e)
             try:
                 bal = await LiveSpotBroker(c).balances()
-                print("live balances:", {a: round(b["total"], 8) for a, b in bal.items()})
+                print("live balances (free, locked):", {a: (round(b["free"], 8), round(b["locked"], 8)) for a, b in bal.items()})
+                print("open orders:", json.dumps([{k: o.get(k) for k in ("symbol", "side", "type", "price", "origQty",
+                                                                        "executedQty", "status", "clientOrderId")}
+                                                  for o in await c.open_orders()], default=str)[:2000])
             except Exception as e:
                 print("balances error:", e)
     finally:
