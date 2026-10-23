@@ -32,6 +32,13 @@ async def _resolve_quantity(info: dict, side: str, quantity: float | None, quote
     return quantity
 
 
+def market_orders_refused(msg: str) -> bool:
+    """Wallex's answer when a market does not take market orders: «امکان ثبت سفارش قیمت بازار در … وجود ندارد»."""
+    return "قیمت بازار" in msg or "market order" in msg.lower()
+
+
+MAX_WALK = 0.02            # how far through the book a refused market order may go as a limit
+
 LIVE_BUY_HEADROOM = 0.005   # 0.3% taker fee on the challenge account + 0.2% for the ask moving
 
 
@@ -76,7 +83,34 @@ class LiveSpotBroker(SpotBroker):
                 price=fmt_num(price, info["price_decimals"]) if type == "LIMIT" else None,
             )
         except WallexError as e:
+            if type != "MARKET" or not market_orders_refused(str(e)):
+                raise wrap_wallex_error(e)
+        # some markets refuse market orders (seen live on USOONUSDT): the same order as a LIMIT priced through the
+        # book fills at once at the resting orders' prices; the caller cancels any part that did not fill
+        price = await self._through_book(symbol, side, qty, info["price_decimals"])
+        try:
+            return await self.client.place_order(symbol, side, "LIMIT", fmt_num(qty, info["qty_decimals"]),
+                                                 price=fmt_num(price, info["price_decimals"]))
+        except WallexError as e:
             raise wrap_wallex_error(e)
+
+    async def _through_book(self, symbol: str, side: str, qty: float, decimals: int) -> float:
+        """The price that fills `qty` against the order book now (the worst level needed), on the tick."""
+        book = await self.client.depth(symbol)
+        levels = book.get("bid" if side == "SELL" else "ask", [])
+        levels = sorted(((safe_float(lv["price"]), safe_float(lv.get("quantity"))) for lv in levels if safe_float(lv["price"])),
+                        reverse=side == "SELL")
+        if not levels:
+            raise BrokerError(f"{symbol}: market orders are refused and the order book is empty")
+        need, price = qty, levels[-1][0]
+        for p, q in levels:
+            price, need = p, need - q
+            if need <= 0:
+                break
+        best = levels[0][0]   # a thin book: go no further than 2% from the best price; the rest is cancelled unfilled
+        price = max(price, best * (1 - MAX_WALK)) if side == "SELL" else min(price, best * (1 + MAX_WALK))
+        step = 10 ** decimals
+        return (math.floor(price * step + 1e-9) if side == "SELL" else math.ceil(price * step - 1e-9)) / step
 
     async def cancel_order(self, order_id: str) -> dict:
         try:

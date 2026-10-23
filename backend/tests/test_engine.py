@@ -9,7 +9,7 @@ import pytest
 
 from conftest import FakeClient, make_settings
 from test_agent_loop import FakeLLM, chunk
-from wallex_agent.brokers import PaperSpotBroker
+from wallex_agent.brokers import BrokerError, PaperSpotBroker
 from wallex_agent.engine import strategy
 from wallex_agent.engine.core import Engine
 from wallex_agent.engine.decider import AIDecider, Decision, ResponseCache, RuleDecider
@@ -528,3 +528,81 @@ async def test_consolidate_sells_an_outside_coin_into_the_usdt_core(tmp_path):
     assert json.loads(control.read_text()) == {"paused": False, "consolidate": []}
     events = [json.loads(l) for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines()]
     assert any(e["event"] == "sweep" and e["symbol"] == "OILUSDT" for e in events)
+
+
+async def test_consolidated_usdt_joins_the_core_cost_basis(tmp_path):
+    """The USDT a consolidation brings in is part of the core: its gain and exit slices count it."""
+    m1 = {"AAAUSDT": synth(start=1.0), "OILUSDT": synth(seed=5, start=160.0), "USDTTMN": line(273_000, 274_000)}
+    feed = SimFeed(m1, {k: hourly(v) for k, v in m1.items()}, 15, {k: 0.002 for k in m1})
+    s = make_settings(tmp_path, engine_quote="USDT", engine_fee_rate=0.0013)
+    broker = SimExec(feed, 1_000_000, s.engine_fee_rate, quote="USDT", tmn_fee_rate=0.003)
+    broker.holdings["OIL"] = 0.09
+    control = tmp_path / "control.json"
+    control.write_text('{"consolidate": ["OIL"]}')
+    engine = Engine(s, feed, broker, CoreDecider(action="SKIP"), Journal(tmp_path / "run"), control_path=control)
+    feed.t = T0 + 86_400
+    await engine.monitor()
+    core = engine.state["core"]
+    assert core["status"] == "holding"
+    assert core["usdt_qty"] == pytest.approx(broker.cash_by["USDT"], rel=1e-6)    # core buy + consolidation proceeds
+    assert 272_000 < core["entry_rate"] < 275_000
+
+
+async def test_consolidate_falls_back_to_the_other_market_and_backs_off(tmp_path):
+    """A market that refuses the sell (USOONUSDT refused market orders live) must not stop the move, nor be retried
+    every 15 seconds."""
+    m1 = {"AAAUSDT": synth(start=1.0), "OILUSDT": synth(seed=5, start=160.0), "OILTMN": synth(seed=5, start=43_000_000.0),
+          "USDTTMN": line(273_000, 274_000)}
+    feed = SimFeed(m1, {k: hourly(v) for k, v in m1.items()}, 15, {k: 0.002 for k in m1})
+    s = make_settings(tmp_path, engine_quote="USDT", engine_fee_rate=0.0013, engine_core_enabled=False)
+
+    class Refusing(SimExec):
+        refuse = {"OILUSDT"}
+
+        async def sell(self, symbol, qty, base, price_hint=None):
+            if symbol in self.refuse:
+                raise BrokerError(f"{symbol}: market orders refused")
+            return await super().sell(symbol, qty, base, price_hint)
+
+    broker = Refusing(feed, 1_000_000, s.engine_fee_rate, quote="USDT", tmn_fee_rate=0.003)
+    broker.holdings["OIL"] = 0.09
+    control = tmp_path / "control.json"
+    control.write_text('{"consolidate": ["OIL"]}')
+    engine = Engine(s, feed, broker, CoreDecider(action="SKIP"), Journal(tmp_path / "run"), control_path=control)
+    feed.t = T0 + 86_400
+    await engine.monitor()
+    assert broker.holdings["OIL"] < 1e-9 and json.loads(control.read_text())["consolidate"] == []   # sold on OILTMN
+
+    broker.refuse = {"OILUSDT", "OILTMN"}
+    broker.holdings["OIL"] = 0.09
+    control.write_text('{"consolidate": ["OIL"]}')
+    for dt in (60, 120, 180):
+        feed.t = T0 + 86_400 + dt
+        await engine.monitor()
+    errors = [json.loads(l) for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines()
+              if '"error"' in l and "consolidate" in l]
+    assert len(errors) == 3                                     # OILUSDT in round one; both once in round two, then a pause
+    assert json.loads(control.read_text())["consolidate"] == ["OIL"]   # still requested: retried after the pause
+    feed.t = T0 + 86_400 + 60 + 301
+    await engine.monitor()
+    assert len([l for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines() if "consolidate sell failed" in l]) == 5
+
+
+async def test_final_sweep_tries_the_other_market_when_one_refuses(tmp_path):
+    m1 = {"AAAUSDT": synth(start=1.0), "OILUSDT": synth(seed=5, start=160.0), "OILTMN": synth(seed=5, start=43_000_000.0),
+          "USDTTMN": line(273_000, 274_000)}
+    feed = SimFeed(m1, {k: hourly(v) for k, v in m1.items()}, 15, {k: 0.002 for k in m1})
+    s = make_settings(tmp_path, engine_quote="USDT", engine_fee_rate=0.0013)
+
+    class Refusing(SimExec):
+        async def sell(self, symbol, qty, base, price_hint=None):
+            if symbol == "OILTMN":
+                raise BrokerError("OILTMN: market orders refused")
+            return await super().sell(symbol, qty, base, price_hint)
+
+    broker = Refusing(feed, 1_000_000, s.engine_fee_rate, quote="USDT", tmn_fee_rate=0.003)
+    broker.holdings["OIL"] = 0.09
+    engine = Engine(s, feed, broker, CoreDecider(action="SKIP"), Journal(tmp_path / "run"))
+    feed.t = T0 + 86_400
+    assert await engine.sweep_unmanaged(feed.t) is True
+    assert broker.holdings["OIL"] < 1e-9 and broker.cash_by["USDT"] > 0.09 * 150

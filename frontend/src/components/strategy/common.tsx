@@ -120,3 +120,45 @@ export function Stat({ label, value, tone, hint }: { label: string; value: React
 }
 
 export const pctOrDash = (v: number | null | undefined, d = 2) => (v == null ? "—" : pct(v, d));
+
+/** Both pages show the engine; a change made on one reloads the other at once instead of on its next poll. */
+const ENGINE_EVENT = "engine-changed";
+export function notifyEngineChanged() { window.dispatchEvent(new Event(ENGINE_EVENT)); }
+export function useEngineChanged(reload: () => void) {
+  useEffect(() => {
+    window.addEventListener(ENGINE_EVENT, reload);
+    return () => window.removeEventListener(ENGINE_EVENT, reload);
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+/** On/off for the strategy. Off pauses new entries and USDT buys at once; open positions keep their stops and targets
+ *  and the end-of-challenge sell-off still runs. On again in live mode asks first (it trades real money). */
+export function EngineSwitch({ on, live, onChanged }: { on: boolean; live: boolean; onChanged: () => void }) {
+  const [ask, setAsk] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const flip = async (to: boolean) => {
+    setBusy(true); setErr("");
+    try {
+      await postJSON("/api/engine/switch", { on: to, confirm: to && live ? "LIVE" : "" });
+      setAsk(false);
+      onChanged();
+      notifyEngineChanged();
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+  return (
+    <>
+      <button role="switch" aria-checked={on} aria-label="روشن/خاموش کردن استراتژی" disabled={busy}
+              className={`switch ${on ? "on" : ""}`} onClick={() => (on ? flip(false) : live ? setAsk(true) : flip(true))}>
+        <span className="switch-knob" /><span className="switch-text">{on ? "روشن" : "خاموش"}</span>
+      </button>
+      {ask && (
+        <ConfirmDialog title="روشن کردن استراتژی" danger busy={busy} error={err} okLabel="بله، روشن شود"
+                       onOk={() => flip(true)} onCancel={() => { setAsk(false); setErr(""); }}>
+          <p>موتور دوباره با پول واقعی خرید می‌کند (ورودهای جدید و تبدیل تومان به تتر).</p>
+        </ConfirmDialog>
+      )}
+    </>
+  );
+}
+

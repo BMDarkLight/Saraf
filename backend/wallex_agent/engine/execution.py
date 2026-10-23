@@ -43,13 +43,19 @@ class SpotExec:
         return (await self.spot.balances()).get(asset, {}).get("free", 0.0)
 
     async def _settled(self, order: dict) -> dict:
-        """Live market orders can report NEW for a moment; wait briefly for the fill."""
+        """Live market orders can report NEW for a moment; wait briefly for the fill. An order still open after that
+        (a market order placed as a limit through the book, on a market that refuses market orders, whose book moved)
+        is cancelled: a leftover must never rest on the book at a price meant to cross it."""
         for _ in range(10):
             if order.get("status") in ("FILLED", "CANCELED") or not order.get("active", False):
                 return order
             await asyncio.sleep(0.5)
             order = await self.spot.get_order(order["clientOrderId"])
-        return order
+        try:
+            await self.spot.cancel_order(order["clientOrderId"])
+        except BrokerError:
+            pass   # filled or gone meanwhile
+        return await self.spot.get_order(order["clientOrderId"])
 
     async def total_cash(self) -> float:
         return await self.holding_total(self.quote)

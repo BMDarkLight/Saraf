@@ -269,3 +269,73 @@ async def test_live_order_requests_match_wallex_docs():
     assert (m3, p3) == ("GET", "/v1/account/orders/c1")
     assert (m4, p4, q4) == ("DELETE", "/v1/account/orders/c1", {})
     assert h1 == h4 == "SUB"
+
+
+async def test_live_market_sell_refused_goes_as_limit_through_the_book(fake):
+    """Seen live 2026-10-23 on USOONUSDT: «امکان ثبت سفارش قیمت بازار در USOONUSDT بازار وجود ندارد». The same sell
+    goes as a LIMIT at the worst bid level it needs, so it still fills at once."""
+    from wallex_agent.brokers import LiveSpotBroker
+    from wallex_agent.wallex import WallexError
+    sent = []
+
+    async def place_order(symbol, side, type, quantity, price=None, client_id=None):
+        sent.append((type, float(quantity), price and float(price)))
+        if type == "MARKET":
+            raise WallexError('اطلاعات وارد شده اشتباه‌است.: {"symbol": ["امکان ثبت سفارش قیمت بازار در BTCUSDT بازار وجود ندارد."]}')
+        return {"status": "FILLED", "clientOrderId": "x"}
+
+    fake.place_order = place_order
+    await LiveSpotBroker(fake).place_order("BTCUSDT", "SELL", "MARKET", quantity=7.0)   # 5 per level: needs two
+    bids = sorted((float(lv["price"]) for lv in (await fake.depth("BTCUSDT"))["bid"]), reverse=True)
+    assert [s[0] for s in sent] == ["MARKET", "LIMIT"] and sent[1][1] == 7.0
+    assert bids[1] - 0.01 < sent[1][2] <= bids[1]                  # the second level, rounded down to the tick
+
+
+async def test_live_other_rejections_are_not_retried_as_limit(fake):
+    from wallex_agent.brokers import BrokerError, LiveSpotBroker
+    from wallex_agent.wallex import WallexError
+    calls = []
+
+    async def place_order(symbol, side, type, quantity, price=None, client_id=None):
+        calls.append(type)
+        raise WallexError("insufficient balance")
+
+    fake.place_order = place_order
+    with pytest.raises(BrokerError, match="insufficient"):
+        await LiveSpotBroker(fake).place_order("BTCUSDT", "SELL", "MARKET", quantity=1.0)
+    assert calls == ["MARKET"]
+
+
+async def test_an_order_left_open_after_settling_is_cancelled():
+    """A sell placed as a limit through the book on a moving book can rest; it must not stay on the book."""
+    from wallex_agent.engine.execution import SpotExec
+
+    class Spot:
+        def __init__(self):
+            self.bal, self.canceled = {"OIL": 1.0, "USDT": 0.0}, []
+
+        async def balances(self):
+            return {k: {"free": v, "total": v} for k, v in self.bal.items()}
+
+        async def place_order(self, symbol, side, type, quantity=None, price=None, quote_amount=None):
+            self.bal["OIL"], self.bal["USDT"] = 0.4, 90.0    # 0.6 filled, the rest rests
+            return {"clientOrderId": "o1", "status": "NEW", "active": True, "executedQty": "0.6"}
+
+        async def get_order(self, oid):
+            gone = "o1" in self.canceled
+            return {"clientOrderId": oid, "status": "CANCELED" if gone else "NEW", "active": not gone, "executedQty": "0.6"}
+
+        async def cancel_order(self, oid):
+            self.canceled.append(oid)
+
+    import wallex_agent.engine.execution as ex
+    spot = Spot()
+    orig = ex.asyncio.sleep
+    async def no_sleep(_):
+        return None
+    ex.asyncio.sleep = no_sleep
+    try:
+        fill = await SpotExec(spot, quote="USDT").sell("OILUSDT", 1.0, "OIL")
+    finally:
+        ex.asyncio.sleep = orig
+    assert spot.canceled == ["o1"] and fill.qty == 0.6 and fill.tmn == 90.0

@@ -119,6 +119,44 @@ def test_copy_persona_applies_its_preset_and_stop_copy_reverts(srv):
     assert not (srv.eng / "tuning.env").exists() and c.get("/api/personas").json()["copying"] is None
 
 
+def test_copy_and_stop_copy_keep_the_persons_challenge_window(srv):
+    """Copying a persona swaps the trading style, not the end of the challenge the person set."""
+    c = srv.c
+    end = "2099-01-01T12:00:00+03:30"
+    assert c.post("/api/strategy/tuning", json={"values": {"engine_end_time": end, "engine_max_positions": 1}}).json()["ok"]
+    c.post("/api/personas/cautious/copy", json={})
+    over = tuning.read_env(srv.eng / "tuning.env")
+    assert over["engine_end_time"] == "2099-01-01T08:30:00Z" and over["engine_max_positions"] == 1   # cautious: 1
+    assert over["engine_breadth_gate_pct"] == 40.0
+    c.post("/api/personas/dip_hunter/copy", json={})
+    over = tuning.read_env(srv.eng / "tuning.env")
+    assert over["engine_end_time"] == "2099-01-01T08:30:00Z" and over["engine_max_positions"] == 3
+    assert "engine_drawdown_stop_pct" not in over                                  # the previous persona is gone
+    c.post("/api/personas/stop-copy", json={})
+    assert tuning.read_env(srv.eng / "tuning.env") == {"engine_end_time": "2099-01-01T08:30:00Z"}
+
+
+def test_a_saved_end_time_survives_once_it_is_near(srv):
+    """Only a newly typed end time must be an hour ahead; one saved earlier is not dropped when it gets close."""
+    import time as _t
+    from datetime import datetime, timezone
+    soon = datetime.fromtimestamp(_t.time() + 600, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    (srv.eng / "tuning.env").write_text(f"ENGINE_END_TIME={soon}\n")
+    assert tuning.read_env(srv.eng / "tuning.env") == {"engine_end_time": soon}
+    assert srv.c.post("/api/strategy/tuning", json={"values": {"engine_max_positions": 2}}).json()["ok"]
+    assert tuning.read_env(srv.eng / "tuning.env")["engine_end_time"] == soon
+    with pytest.raises(tuning.TuningError):
+        tuning.validate({"engine_end_time": soon})
+
+
+def test_drawdown_pause_is_checked_against_the_running_stop(srv):
+    """Pause 0.10 alone is in bounds, but not above a stop of 0.08 already saved."""
+    c = srv.c
+    assert c.post("/api/strategy/tuning", json={"values": {"engine_drawdown_stop_pct": 0.08}}).json()["ok"]
+    r = c.post("/api/strategy/tuning", json={"values": {"engine_drawdown_pause_pct": 0.10}})
+    assert r.status_code == 400 and "pause" in r.json()["detail"]
+
+
 def test_chat_proposal_is_validated_and_only_keeps_real_changes():
     eff = {"engine_max_positions": 2, "engine_breadth_gate_pct": 25.0, "engine_drawdown_pause_pct": 0.06,
            "engine_drawdown_stop_pct": 0.12}
@@ -202,3 +240,29 @@ def test_engine_switch_pauses_freely_but_turning_on_live_needs_confirmation(srv)
     c.post("/api/engine/switch", json={"on": False})
     assert c.post("/api/engine/switch", json={"on": True}).status_code == 400 and srv.server.engine_paused()
     assert c.post("/api/engine/switch", json={"on": True, "confirm": "LIVE"}).json()["on"]
+
+
+def test_undo_reverts_only_what_that_message_changed(srv, monkeypatch):
+    """Undoing an assistant change must not wipe what was set after it (by hand or by a later message)."""
+    calls = iter([
+        {"reply": "ok", "proposal": {"changes": {"engine_max_positions": 1}, "reasoning": "", "dropped": []}, "apply": True},
+        {"reply": "ok", "proposal": {"changes": {"engine_risk_per_trade_pct": 0.005}, "reasoning": "", "dropped": []},
+         "apply": True},
+    ])
+
+    async def fake_ask(*a, **kw):
+        return next(calls)
+    monkeypatch.setattr(strategy_chat, "ask", fake_ask)
+    monkeypatch.setattr(srv.server.settings, "llm_api_key", "k")
+    monkeypatch.setattr(srv.server, "STRATEGY_CHATS", srv.tmp / "data/strategy_chats")
+    (srv.eng / "tuning.env").write_text("ENGINE_MAX_POSITIONS=2\n")
+    c = srv.c
+    sid = c.post("/api/strategy/chat", json={"message": "یک پوزیشن"}).json()["session_id"]
+    c.post("/api/strategy/tuning", json={"values": {"engine_breadth_gate_pct": 30}})        # by hand, afterwards
+    c.post("/api/strategy/chat", json={"message": "ریسک نصف", "session_id": sid})
+    assert c.post(f"/api/strategy/chats/{sid}/undo", json={"index": 1}).json()["ok"]
+    assert tuning.read_env(srv.eng / "tuning.env") == {"engine_max_positions": 2, "engine_breadth_gate_pct": 30.0,
+                                                        "engine_risk_per_trade_pct": 0.005}
+    assert c.post(f"/api/strategy/chats/{sid}/undo", json={"index": 1}).status_code == 400   # already undone
+    assert c.post(f"/api/strategy/chats/{sid}/undo", json={"index": 3}).json()["ok"]
+    assert tuning.read_env(srv.eng / "tuning.env") == {"engine_max_positions": 2, "engine_breadth_gate_pct": 30.0}

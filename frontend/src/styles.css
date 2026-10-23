@@ -892,3 +892,9 @@ table.diff td { padding: 6px; border-top: 1px solid var(--border-soft); unicode-
 .switch.on { flex-direction: row-reverse; padding: 3px 3px 3px 12px; }
 .hold { flex-wrap: wrap; }
 .hold-move { margin-inline-start: auto; }
+
+/* one on/off switch, same on the trade page and the strategy page; the account choice lives in settings */
+.spage-switch { display: inline-flex; align-items: center; gap: 8px; }
+.run-panel { margin-bottom: 16px; }
+.run-panel .strat-real { position: relative; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.run-panel .run-pop { position: static; max-width: 560px; }

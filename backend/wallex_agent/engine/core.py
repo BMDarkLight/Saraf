@@ -60,6 +60,7 @@ class Engine:
         # the UI's on/off switch (data/engine/control.json, main engine only): off = no new entries and no new USDT
         # buys; exits, stops, the core guard and the end-of-challenge flatten keep running
         self.control_path = control_path
+        self._consolidate_retry: dict[str, float] = {}   # asset -> when a failed consolidate sell may be retried
         self.state = {"positions": {}, "peak": settings.engine_capital_tmn, "pause_until": 0.0, "halted": False,
                       "cooldown": {}, "regime": "neutral", "regime_reason": "", "regime_at": 0.0,
                       "seq": 0, "bars": 0, "flattened": False, "closed": [], "pending": {}}
@@ -95,11 +96,16 @@ class Engine:
             return
         managed = {p["base"] for p in self.positions.values()}
         left = []
+        backoff = self._consolidate_retry
         wallet = await self.broker.wallet()
         for asset in todo:
             free = wallet.get(asset, (0.0, 0.0))[0]
             if asset in managed or free <= 0:
                 continue
+            if backoff.get(asset, 0) > now:   # failed a moment ago: retry in a few minutes, not every tick
+                left.append(asset)
+                continue
+            failed = False
             for symbol in (f"{asset}{self.quote}", f"{asset}TMN"):
                 try:
                     bid = (await self.feed.quote(symbol))["bid"]
@@ -110,14 +116,20 @@ class Engine:
                     break
                 try:
                     fill = await self.broker.sell(symbol, free, asset)
-                except Exception as e:
+                except Exception as e:   # this market refused it: try the asset's other market
                     self.journal.log("error", now, symbol=symbol, error=f"consolidate sell failed: {e}")
-                    left.append(asset)
-                    break
+                    failed = True
+                    continue
+                failed = False
                 self.journal.log("sweep", now, symbol=symbol, qty=fill.qty, price=fill.price, proceeds=fill.tmn,
                                  reason=f"consolidate: {asset} bought outside the engine sold into {split_symbol(symbol)[1]} "
                                         "on request, for the USDT core")
+                if self.core and split_symbol(symbol)[1] == "USDT":
+                    await self.core.add_usdt(fill.tmn, await self.core.rate())
                 break
+            if failed:
+                backoff[asset] = now + 300
+                left.append(asset)
         ctl["consolidate"] = left
         tmp = self.control_path.with_suffix(".tmp")
         tmp.write_text(json.dumps(ctl))
@@ -498,6 +510,7 @@ class Engine:
         for asset, (free, _) in (await self.broker.wallet()).items():
             if asset == "TMN" or free <= 0 or (asset == "USDT" and self.core):
                 continue
+            sold = True   # stays True for dust or an asset with no market
             for symbol in (f"{asset}TMN", f"{asset}USDT"):
                 try:
                     bid = (await self.feed.quote(symbol))["bid"]
@@ -508,13 +521,15 @@ class Engine:
                     break           # dust: nothing an order could sell
                 try:
                     fill = await self.broker.sell(symbol, free, asset)
-                except Exception as e:
+                except Exception as e:   # this market refused it: try the asset's other market
                     self.journal.log("error", now, symbol=symbol, error=f"final sweep sell failed: {e}")
-                    done = False
-                    break
+                    sold = False
+                    continue
+                sold = True
                 self.journal.log("sweep", now, symbol=symbol, qty=fill.qty, price=fill.price, proceeds=fill.tmn,
                                  reason="challenge end: a coin the engine did not buy is sold so the result is in TMN")
                 break
+            done = done and sold
         return done
 
     async def _exit(self, pid: str, reason: str, now: float, hint: float | None = None, note: str | None = None) -> None:

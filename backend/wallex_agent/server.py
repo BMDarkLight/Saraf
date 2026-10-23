@@ -675,7 +675,8 @@ async def set_tuning(body: TuningIn):
     try:
         new = tuning.validate(body.values)
         merged = new if body.reset else {**tuning.read_env(TUNING_FILE), **new}
-        tuning.validate(merged)
+        tuning.validate(merged, new=False)
+        tuning.check_pair({**effective_settings(), **merged})   # e.g. a new pause above the profile's stop
     except tuning.TuningError as e:
         raise HTTPException(400, str(e))
     _check_live_confirm(body.confirm)
@@ -766,7 +767,7 @@ async def copy_persona(persona_id: str, body: CopyIn):
     _need_systemd()
     STRATEGY_PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
     STRATEGY_PROFILE_FILE.write_text(STRATEGY_ENV.read_text())   # personas are built on the strategy profile
-    _write_tuning(tuning.validate(p["preset"]))
+    _write_tuning({**tuning.keep_on_copy(tuning.read_env(TUNING_FILE)), **tuning.validate(p["preset"])})
     COPY_FILE.write_text(json.dumps({"id": p["id"], "name": p["name"], "at": time.time(), "modified": False},
                                     ensure_ascii=False))
     await _restart_engine()
@@ -778,7 +779,7 @@ async def stop_copy(body: CopyIn):
     _check_live_confirm(body.confirm)
     _need_systemd()
     COPY_FILE.unlink(missing_ok=True)
-    _write_tuning({})
+    _write_tuning(tuning.keep_on_copy(tuning.read_env(TUNING_FILE)))
     await _restart_engine()
     return {"ok": True}
 
@@ -891,7 +892,8 @@ async def _apply_overrides(values: dict, confirm: str, source: str) -> dict:
     """Merge validated overrides into tuning.env and restart the engine. Returns the overrides before the change."""
     before = tuning.read_env(TUNING_FILE)
     merged = {**before, **tuning.validate(values)}
-    tuning.validate(merged)
+    tuning.validate(merged, new=False)
+    tuning.check_pair({**effective_settings(), **merged})
     _check_live_confirm(confirm)
     _need_systemd()
     _write_tuning(merged)
@@ -938,16 +940,30 @@ class UndoIn(BaseModel):
 
 @app.post("/api/strategy/chats/{cid}/undo")
 async def undo_strategy_change(cid: str, body: UndoIn):
-    """Put the saved overrides back as they were before the assistant applied message `index`."""
+    """Undo what the assistant applied in message `index`: each setting it changed goes back to its saved value
+    from before (or back to the profile's if it had none); settings changed since by anything else are kept."""
     chat = _load_chat(cid)
     try:
         msg = chat["messages"][body.index]
         prev = msg["applied"]["previous_overrides"]
+        changed = list(msg["applied"]["changes"])
     except (IndexError, KeyError, TypeError):
         raise HTTPException(400, "that message did not apply anything")
+    if msg.get("undone"):
+        raise HTTPException(400, "already undone")
     _check_live_confirm(body.confirm)
     _need_systemd()
-    _write_tuning(tuning.validate(prev) if prev else {})
+    now = tuning.read_env(TUNING_FILE)
+    for k in changed:
+        if k in prev:
+            now[k] = prev[k]
+        else:
+            now.pop(k, None)
+    try:
+        tuning.validate(now, new=False)
+    except tuning.TuningError as e:
+        raise HTTPException(400, f"cannot undo: {e}")
+    _write_tuning(now)
     await _restart_engine()
     msg["undone"] = time.time()
     _save_chat(chat)

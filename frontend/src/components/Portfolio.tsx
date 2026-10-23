@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getJSON } from "../api";
 import { compact, pct, price, tone } from "../format";
-import { ConfirmDialog, countdown, postJSON, Sparkline, useNow } from "./strategy/common";
+import { ConfirmDialog, countdown, EngineSwitch, postJSON, Sparkline, useEngineChanged, useNow } from "./strategy/common";
 import { CORE_FA, REGIME_FA } from "./strategy/Overview";
 import type { StrategyTab } from "./strategy/StrategyPage";
 
@@ -21,6 +21,7 @@ export function Portfolio({ refreshKey, assistantLive, onOpenStrategy }: {
   const [paper, setPaper] = useState<any>(null);
   const [strat, setStrat] = useState<any>(null);
   const [showPaper, setShowPaper] = useState(false);
+  useEngineChanged(() => getJSON("/api/strategy").then(setStrat).catch(() => {}));
 
   useEffect(() => {
     let live = true;
@@ -142,36 +143,6 @@ function AccountCard({ acc, capital, live, managed, onChanged }: {
         )}
       </div>
     </div>
-  );
-}
-
-/** On/off for the strategy. Off pauses new entries and USDT buys at once; open positions keep their stops and targets
- *  and the end-of-challenge sell-off still runs. On again in live mode asks first (it trades real money). */
-function EngineSwitch({ on, live, onChanged }: { on: boolean; live: boolean; onChanged: () => void }) {
-  const [ask, setAsk] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState("");
-  const flip = async (to: boolean) => {
-    setBusy(true); setErr("");
-    try {
-      await postJSON("/api/engine/switch", { on: to, confirm: to && live ? "LIVE" : "" });
-      setAsk(false);
-      onChanged();
-    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
-  };
-  return (
-    <>
-      <button role="switch" aria-checked={on} aria-label="روشن/خاموش کردن استراتژی" disabled={busy}
-              className={`switch ${on ? "on" : ""}`} onClick={() => (on ? flip(false) : live ? setAsk(true) : flip(true))}>
-        <span className="switch-knob" /><span className="switch-text">{on ? "روشن" : "خاموش"}</span>
-      </button>
-      {ask && (
-        <ConfirmDialog title="روشن کردن استراتژی" danger busy={busy} error={err} okLabel="بله، روشن شود"
-                       onOk={() => flip(true)} onCancel={() => { setAsk(false); setErr(""); }}>
-          <p>موتور دوباره با پول واقعی خرید می‌کند (ورودهای جدید و تبدیل تومان به تتر).</p>
-        </ConfirmDialog>
-      )}
-    </>
   );
 }
 

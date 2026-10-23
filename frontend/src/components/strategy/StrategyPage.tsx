@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { getJSON } from "../../api";
 import { pct, tone } from "../../format";
-import { countdown, hhmm, useNow } from "./common";
+import { countdown, EngineSwitch, hhmm, notifyEngineChanged, useEngineChanged, useNow } from "./common";
 import { Overview } from "./Overview";
 import { Personas } from "./Personas";
 import { StrategyChat } from "./StrategyChat";
@@ -12,7 +12,8 @@ const TABS: [StrategyTab, string][] = [
   ["overview", "نمای کلی"], ["tune", "تنظیمات"], ["personas", "کپی‌تریدینگ"], ["chat", "دستیار"], ["evidence", "شواهد"],
 ];
 
-/** The strategy as a page of its own: header with the real-money switch, then one focused tab at a time. */
+/** The strategy as a page of its own: header with the same on/off switch as the trade page's engine card, then one
+ *  focused tab at a time. Which account it trades (simulated or real) is set on the settings tab. */
 export function StrategyPage({ onModeChanged, tab, setTab }: { onModeChanged?: () => void; tab: StrategyTab; setTab: (t: StrategyTab) => void }) {
   const [d, setD] = useState<any>(null);
   const [tuning, setTuning] = useState<any>(null);
@@ -21,12 +22,13 @@ export function StrategyPage({ onModeChanged, tab, setTab }: { onModeChanged?: (
     getJSON("/api/strategy").then(setD).catch(() => {});
     getJSON("/api/strategy/tuning").then(setTuning).catch(() => {});
   };
+  useEngineChanged(load);
   useEffect(() => {
     load();
     const t = setInterval(load, 30000);
     return () => clearInterval(t);
   }, []);
-  const changed = () => { onModeChanged?.(); for (const ms of [0, 5000, 15000, 30000]) setTimeout(load, ms); };
+  const changed = () => { onModeChanged?.(); notifyEngineChanged(); for (const ms of [5000, 15000, 30000]) setTimeout(load, ms); };
   const e = d?.engine;
   const end = d?.end_time ? Date.parse(d.end_time) : null;
 
@@ -40,7 +42,8 @@ export function StrategyPage({ onModeChanged, tab, setTab }: { onModeChanged?: (
           {end && <span className="muted small">تا پایان: <b>{countdown(end - now)}</b></span>}
           {tuning?.copying && <span className="pill">کپی از {tuning.copying.name}</span>}
         </div>
-        {d && <RealSwitch on={!!d.strategy_live} liveAt={d.live_at} now={now} onChanged={changed} />}
+        {e && <div className="spage-switch"><span className="muted small">استراتژی</span>
+          <EngineSwitch on={!d.paused} live={d.mode === "live"} onChanged={load} /></div>}
       </header>
       <nav className="stabs" role="tablist">
         {TABS.map(([k, l]) => (
@@ -50,7 +53,17 @@ export function StrategyPage({ onModeChanged, tab, setTab }: { onModeChanged?: (
       <div className="spage-b">
         {tab === "overview" && (!d ? <div className="muted">در حال بارگذاری…</div>
           : !e ? <div className="muted">موتور هنوز اجرا نشده است.</div> : <Overview d={d} now={now} />)}
-        {tab === "tune" && <Tuning onApplied={changed} />}
+        {tab === "tune" && (
+          <>
+            {d && <section className="panel run-panel">
+              <h4>حساب اجرا</h4>
+              <p className="muted small">کدام حساب را موتور معامله کند: شبیه‌سازی (بدون پول واقعی) یا حساب واقعی والکس.
+                روشن/خاموش بالای صفحه فقط خریدهای جدید را متوقف می‌کند؛ این‌جا خود حساب عوض می‌شود.</p>
+              <RealSwitch on={!!d.strategy_live} liveAt={d.live_at} now={now} onChanged={changed} />
+            </section>}
+            <Tuning onApplied={changed} />
+          </>
+        )}
         {tab === "personas" && <Personas params={tuning?.params ?? []} onApplied={changed} />}
         {tab === "chat" && <StrategyChat params={tuning?.params ?? []} live={!!tuning?.live} onApplied={changed} />}
         {tab === "evidence" && <Evidence />}

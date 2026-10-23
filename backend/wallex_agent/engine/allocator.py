@@ -126,6 +126,19 @@ class CoreAllocator:
                   qty=fill.qty, price=fill.price, tmn=fill.tmn)
         self.e.save()
 
+    async def add_usdt(self, qty: float, rate: float) -> None:
+        """USDT that joined the core from outside its own buys (a consolidated coin sold on its USDT market): it
+        enters the cost basis at today's rate, so the core's gain and its exit slices count it."""
+        st = self.st
+        if not st["usdt_qty"] and st["entry_rate"]:   # pre-held USDT with no recorded cost: seed it at its entry rate
+            held = max(0.0, await self._usdt() - qty)
+            st["usdt_cost_tmn"], st["usdt_qty"] = held * st["entry_rate"], held
+        st["usdt_cost_tmn"] += qty * rate
+        st["usdt_qty"] += qty
+        st.update(status="holding" if st["status"] == "idle" else st["status"],
+                  entry_rate=st["usdt_cost_tmn"] / st["usdt_qty"], peak_rate=max(st["peak_rate"] or 0, rate))
+        self.e.save()
+
     # ----------------------------------------------------------------- exit
     async def _exit_step(self, now: float) -> None:
         st = self.st

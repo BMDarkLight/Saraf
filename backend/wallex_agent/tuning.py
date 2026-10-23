@@ -93,7 +93,7 @@ class TuningError(ValueError):
     pass
 
 
-def _utc_iso(raw: Any) -> str:
+def _utc_iso(raw: Any, future: bool = True) -> str:
     """An ISO time with a UTC offset (e.g. 2026-10-26T23:59:00+03:30) -> '2026-10-26T20:29:00Z'."""
     from datetime import datetime, timezone
     try:
@@ -103,14 +103,15 @@ def _utc_iso(raw: Any) -> str:
     if t.tzinfo is None:
         raise TuningError("the end time needs a UTC offset, e.g. +03:30 for Tehran")
     import time as _time
-    if t.timestamp() < _time.time() + 3600:   # a past end would sell everything to TMN at once and stop the engine
+    if future and t.timestamp() < _time.time() + 3600:   # a past end would sell everything to TMN at once and stop the engine
         raise TuningError("the end time must be at least an hour from now")
     return t.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def validate(values: dict[str, Any]) -> dict[str, Any]:
+def validate(values: dict[str, Any], new: bool = True) -> dict[str, Any]:
     """Coerce and bound-check UI values. Unknown keys or out-of-range numbers are errors, not silently clamped:
-    the person must see that the engine will not run what they typed."""
+    the person must see that the engine will not run what they typed. `new=False` reads values saved earlier: an end
+    time saved then is kept even once it is near or past (only a newly entered one must be an hour ahead)."""
     out: dict[str, Any] = {}
     for key, raw in values.items():
         p = BY_KEY.get(key)
@@ -119,7 +120,7 @@ def validate(values: dict[str, Any]) -> dict[str, Any]:
         t = p["type"]
         try:
             if t == "datetime":
-                v = _utc_iso(raw)
+                v = _utc_iso(raw, future=new)
             elif t == "bool":
                 v: Any = raw if isinstance(raw, bool) else str(raw).strip().lower() in ("1", "true", "yes", "on")
             elif t == "int":
@@ -144,10 +145,24 @@ def validate(values: dict[str, Any]) -> dict[str, Any]:
         if t in ("int", "float", "pct") and not (p["min"] - 1e-9 <= v <= p["max"] + 1e-9):
             raise TuningError(f"{key} must be between {p['min']} and {p['max']}")
         out[key] = v
-    pause, stop = out.get("engine_drawdown_pause_pct"), out.get("engine_drawdown_stop_pct")
+    check_pair(out)
+    return out
+
+
+def check_pair(values: dict[str, Any]) -> None:
+    pause, stop = values.get("engine_drawdown_pause_pct"), values.get("engine_drawdown_stop_pct")
     if pause is not None and stop is not None and pause >= stop:
         raise TuningError("the drawdown pause must be below the drawdown stop")
-    return out
+
+
+# The challenge window and the sell-off schedule around it: the person's, not a trading style
+WINDOW_KEYS = ("engine_end_time", "engine_no_entry_before_end_min", "engine_flatten_before_end_min",
+               "engine_core_exit_hours", "engine_core_exit_slices")
+
+
+def keep_on_copy(overrides: dict[str, Any]) -> dict[str, Any]:
+    """Overrides that survive copying a persona or stopping a copy (a persona never sets these)."""
+    return {k: v for k, v in overrides.items() if k in WINDOW_KEYS}
 
 
 def to_env(values: dict[str, Any]) -> str:
@@ -170,7 +185,7 @@ def read_env(path: Path) -> dict[str, Any]:
         k = k.strip().lower()
         if k in BY_KEY:
             try:
-                out.update(validate({k: v.strip()}))
+                out.update(validate({k: v.strip()}, new=False))
             except TuningError:
                 pass
     return out
