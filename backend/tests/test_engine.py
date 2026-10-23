@@ -452,3 +452,21 @@ async def test_challenge_end_also_sells_coins_the_engine_did_not_buy(tmp_path):
     assert broker.cash_by["TMN"] > 4_500_000 and broker.cash_by["USDT"] * 271_000 < 50_000
     events = [json.loads(l) for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines()]
     assert any(e["event"] == "sweep" and e["symbol"] == "OILTMN" for e in events)
+
+
+async def test_coins_bought_outside_the_engine_do_not_fill_the_satellite_cap(tmp_path):
+    """Live, 2026-10-23: ~80% of the account in USOON (bought by hand) made the exposure room negative, so the
+    satellite could never enter. The cap now counts only the engine's own positions and entry orders."""
+    m1 = {"AAAUSDT": synth(start=1.0, crash_at=3 * 1440 + 300), "OILTMN": synth(seed=5, start=40_000_000.0),
+          "USDTTMN": line(273_000, 274_000)}
+    feed = SimFeed(m1, {k: hourly(v) for k, v in m1.items()}, 15, {k: 0.002 for k in m1})
+    s = make_settings(tmp_path, engine_quote="USDT", engine_universe="AAAUSDT", engine_min_score=0.0,
+                      engine_min_atr_pct=0.05, engine_fee_rate=0.0013, engine_maker_fee_rate=0.001,
+                      engine_max_exposure_pct=0.3, engine_max_position_pct=0.125)
+    broker = SimExec(feed, 1_000_000, s.engine_fee_rate, maker_fee_rate=s.maker_fee, quote="USDT", tmn_fee_rate=0.003)
+    broker.holdings["OIL"] = 0.1                                     # ~4M TMN held by the person, not the engine
+    engine = Engine(s, feed, broker, CoreDecider(core="WAIT"), Journal(tmp_path / "run"))
+    await run(engine, feed, T0 + 3 * 86_400, T0 + 4 * 86_400 - 60)
+    events = [json.loads(l) for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines()]
+    assert any(e["event"] == "entry" for e in events)
+    assert broker.holdings["OIL"] == 0.1                             # the person's coins are left alone

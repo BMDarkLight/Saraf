@@ -66,8 +66,8 @@ export function Overview({ d, now }: { d: any; now: number }) {
           ))}
         </div>
         {other / Math.max(eq, 1) > 0.02 && (
-          <div className="note">رمزارزی که خارج از موتور خریده شده (مثلاً از چت) جزو ماهواره نیست، سقف ریسک ماهواره را پر
-            می‌کند و در پایان چالش به تومان فروخته می‌شود.</div>
+          <div className="note">رمزارزی که خارج از موتور خریده شده (مثلاً از چت) جزو ماهواره نیست و سقف ماهواره را پر نمی‌کند؛ در
+            افت سرمایه حساب می‌شود و در پایان چالش به تومان فروخته می‌شود.</div>
         )}
         {usdtMode && core?.entry_rate ? <div className="muted small">{CORE_FA[status] ?? status} — میانگین خرید تتر <bdi className="num">{price(core.entry_rate)}</bdi> تومان</div> : null}
       </section>

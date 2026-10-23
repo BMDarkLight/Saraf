@@ -121,6 +121,19 @@ class Engine:
                 exposure += value
         return equity, free_q * rate, exposure + (total_q - free_q) * rate
 
+    async def satellite_exposure(self) -> float:
+        """What the exposure cap limits: the engine's own positions at the bid plus quote reserved by its entry orders,
+        in TMN. Coins bought outside the engine (by hand or through the chat) count in equity and the drawdown
+        guards, not here: the person decided to hold them, and they must not stop the strategy from trading."""
+        rate = await self.rate()
+        total = sum(o.get("amount_tmn", 0.0) for o in self.pending.values())
+        for p in self.positions.values():
+            try:
+                total += p["qty"] * (await self.feed.quote(p["symbol"]))["bid"] * rate
+            except Exception:   # no quote right now: count what it cost
+                total += p.get("cost_tmn", 0.0)
+        return total
+
     async def reconcile(self) -> None:
         """After a restart, trust the exchange: drop positions whose coins are gone."""
         now = self.feed.now()
@@ -245,7 +258,7 @@ class Engine:
         stop, target = self.risk.clamp_stop_target(price, cand.atr, dp["stop_atr"], dp["target_atr"])
         rate = await self.rate()   # sizing is in TMN; orders are in the market's quote
         self.risk.min_notional = await self.feed.min_notional(cand.symbol) * rate
-        sz = self.risk.size(equity=eq, cash=cash, exposure=exposure, price=price, stop=stop,
+        sz = self.risk.size(equity=eq, cash=cash, exposure=await self.satellite_exposure(), price=price, stop=stop,
                             size_fraction=dp["size_fraction"], regime=self.state["regime"])
         if not sz.quote_amount:
             self.journal.log("risk_block", now, symbol=cand.symbol, setup=cand.setup, reason=sz.reason)
