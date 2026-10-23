@@ -71,7 +71,16 @@ jobs:
           /root/.local/bin/uv sync --frozen
           set -a; [ -n "$PROFILE" ] && . "../$PROFILE"; set +a
           # no .env in the checkout: public market data only, rules decider unless asked otherwise
-          if [ "${ARGS%% *}" = "personas" ]; then
+          if [ "${ARGS%% *}" = "profiles" ]; then
+            # "profiles a.env,b.env -- --days 14": the same rules backtest under several env files; a line each
+            FILES="$(echo "$ARGS" | sed -E 's/^profiles ([^ ]+).*/\1/')"; REST="${ARGS#*--}"
+            for f in ${FILES//,/ }; do
+              ( set -a; . "../$f"; set +a; rm -rf ../data/backtests
+                /root/.local/bin/uv run python -m wallex_agent.engine backtest $REST --decider rules > /dev/null
+                m=$(ls -d ../data/backtests/*/ | head -1)
+                python3 -c "import json,sys; m=json.load(open(sys.argv[1]+'metrics.json')); print('PROFILE_BT', sys.argv[2], json.dumps({k: m.get(k) for k in ('net_return_pct','max_drawdown_pct','trades','win_rate_pct','profit_factor','fees_paid_tmn','decisions','risk_blocks','by_setup','exit_reasons')}))" "$m" "$f" )
+            done
+          elif [ "${ARGS%% *}" = "personas" ]; then
             # "personas --days 7": one rules backtest per persona; a JSON line each for results/personas/<id>.json
             REST="${ARGS#personas}"
             for id in $(/root/.local/bin/uv run python -c "from wallex_agent.personas import PERSONAS; print(' '.join(p['id'] for p in PERSONAS))"); do
