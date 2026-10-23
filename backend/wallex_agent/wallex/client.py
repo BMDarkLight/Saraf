@@ -101,7 +101,9 @@ class WallexClient:
                 if attempt < retries:
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
-                raise WallexError(f"network error calling {path}: {e}") from e
+                # httpx timeouts stringify as "": name the exception so the journal says what happened
+                raise WallexError(f"network error calling {path} after {retries + 1} tries: "
+                                  f"{type(e).__name__}{f' ({e})' if str(e) else ''}") from e
             if r.status_code in (429, 502, 503, 504) and attempt < retries:
                 await asyncio.sleep(0.7 * (attempt + 1))
                 continue

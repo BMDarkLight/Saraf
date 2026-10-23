@@ -470,3 +470,16 @@ async def test_coins_bought_outside_the_engine_do_not_fill_the_satellite_cap(tmp
     events = [json.loads(l) for l in (tmp_path / "run" / "decisions.jsonl").read_text().splitlines()]
     assert any(e["event"] == "entry" for e in events)
     assert broker.holdings["OIL"] == 0.1                             # the person's coins are left alone
+
+
+async def test_network_errors_name_the_exception():
+    """Live 2026-10-22 17:52-18:00 UTC: 'network error calling /v1/account/balances: ' - a timeout with no text."""
+    import httpx
+    from wallex_agent.wallex import WallexClient, WallexError
+
+    def handler(req):
+        raise httpx.ReadTimeout("")
+    c = WallexClient(api_key="k")
+    c._http = httpx.AsyncClient(base_url="https://x", transport=httpx.MockTransport(handler))
+    with pytest.raises(WallexError, match=r"after 3 tries: ReadTimeout$"):
+        await c.balances()
