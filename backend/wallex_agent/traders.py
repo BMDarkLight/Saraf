@@ -107,24 +107,30 @@ class Hyperliquid:
         all; only accounts above `min_account` are kept."""
         out: list[dict] = []
         dec = json.JSONDecoder()
-        buf = ""
+        buf, pos, inside = "", 0, False
         async with self.http.stream("GET", HL_BOARD, timeout=120) as r:
             r.raise_for_status()
             async for chunk in r.aiter_text():
                 buf += chunk
-                while True:
-                    start = buf.find('{"ethAddress"')
-                    if start < 0:
-                        buf = buf[-20:]
+                if not inside:   # skip to the rows array, whatever comes before it
+                    i = buf.find('"leaderboardRows"')
+                    j = buf.find("[", i) if i >= 0 else -1
+                    if j < 0:
+                        continue
+                    inside, pos = True, j + 1
+                while True:   # one row object at a time, in whatever key order the feed uses
+                    while pos < len(buf) and buf[pos] in " \t\r\n,":
+                        pos += 1
+                    if pos >= len(buf) or buf[pos] == "]":
                         break
                     try:
-                        row, end = dec.raw_decode(buf, start)
+                        row, end = dec.raw_decode(buf, pos)
                     except ValueError:   # the row continues in the next chunk
-                        buf = buf[start:]
                         break
-                    buf = buf[end:]
+                    pos = end
                     if float(row.get("accountValue") or 0) >= min_account:
                         out.append(_board_row(row))
+                buf, pos = buf[pos:], 0
         return out
 
 
@@ -344,7 +350,8 @@ async def run(s: Settings, directory: Path = DIR, max_loops: int | None = None) 
             loops += 1
             now = time.time()
             sel = load_json(directory / "selection.json", {})
-            if now - sel.get("at", 0) > RESELECT_SECONDS:
+            # weekly, and every 10 minutes while the pick is empty (a failed or empty leaderboard read)
+            if now - sel.get("at", 0) > (RESELECT_SECONDS if sel.get("traders") else 600):
                 try:
                     rows = await hl.leaderboard()
                     picked = pick_leaders(rows)

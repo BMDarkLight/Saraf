@@ -55,7 +55,9 @@ async def test_leaderboard_is_read_as_a_stream():
                                        ["week", {"pnl": "2", "roi": "0.1", "vlm": "5"}],
                                        ["month", {"pnl": "3", "roi": "0.2", "vlm": "5"}],
                                        ["allTime", {"pnl": "4", "roi": "0.3", "vlm": "5"}]]}
-    body = json.dumps({"leaderboardRows": [row(1, 5e6, "Big"), row(2, 10), row(3, 3e6)]}).encode()
+    rows = [row(1, 5e6, "Big"), row(2, 10), row(3, 3e6)]
+    rows[2] = dict(reversed(list(rows[2].items())))   # the live feed's key order is not ethAddress-first
+    body = json.dumps({"leaderboardRows": rows}, indent=1).encode()
 
     class Chunked(httpx.AsyncByteStream):
         async def __aiter__(self):
