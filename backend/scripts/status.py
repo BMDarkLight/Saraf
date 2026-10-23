@@ -193,6 +193,20 @@ async def signal_scan() -> None:
         await c.aclose()
 
 
+def report_trader(d: Path) -> None:
+    """A followed real trader (wallex_agent/traders.py): their book and the simulated copy."""
+    print(f"\n================ trader: {d.name} ================")
+    prof = json.loads((d / "trader.json").read_text()) if (d / "trader.json").exists() else {}
+    state = json.loads((d / "state.json").read_text()) if (d / "state.json").exists() else {}
+    print("name:", prof.get("name"), "source:", prof.get("source"), "account $", round(prof.get("account_usd") or 0),
+          "30d pnl $", round((prof.get("board") or {}).get("pnl_month") or 0))
+    print("book:", [(p["coin"], p["side"], round(p["usd"])) for p in prof.get("positions", [])[:8]])
+    print("copy weights:", {k: round(v, 3) for k, v in (prof.get("copy_weights") or {}).items()},
+          "copy holdings:", state.get("holdings"), "cash usdt:", round(state.get("cash_usdt") or 0, 4))
+    for l in (tail_lines(d / "decisions.jsonl", 20_000) if (d / "decisions.jsonl").exists() else [])[-6:]:
+        print("  ", l[:220])
+
+
 def summary(eng: Path) -> None:
     """A short block at the end of the log: what each check reads first."""
     print("\n================ SUMMARY ================")
@@ -210,7 +224,8 @@ def summary(eng: Path) -> None:
         if last:
             eq = float(last[1])
             print(f"{d.name:<20} equity {eq:>12,.0f} ({100 * (eq / 5_000_000 - 1):+.2f}%) 1h {float(last[1]) - float(hour[1]):+,.0f} "
-                  f"dd {last[4]}% trades {n_tr} open {len(state.get('positions', {}))} pending {len(state.get('pending', {}))} "
+                  f"dd {last[4]}% trades {n_tr} open {len(state.get('positions') or state.get('holdings') or {})} "
+                  f"pending {len(state.get('pending') or {})} "
                   f"regime {state.get('regime')} core {(state.get('core') or {}).get('status')} "
                   f"last-hour {dict(Counter(e['event'] for e in recent))}")
 
@@ -226,8 +241,13 @@ def main() -> None:
         print(f"{name}: {'present' if p.exists() else 'absent'}", (p.read_text().strip()[:300] if p.exists() and name != "profile.env" else ""))
     print("ENGINE_END_TIME seen by this process:", os.environ.get("ENGINE_END_TIME") or get_settings().engine_end_time)
     for d in sorted(eng.iterdir()) if eng.exists() else []:
-        if d.is_dir() and (d / "state.json").exists():
-            report_run(d, a.events)
+        if d.is_dir() and d.name.startswith("trader-"):
+            report_trader(d)
+        elif d.is_dir() and (d / "state.json").exists():
+            try:
+                report_run(d, a.events)
+            except Exception as e:   # one odd journal must not hide the rest of the report
+                print(f"report of {d.name} failed: {type(e).__name__}: {e}")
     try:
         asyncio.run(market_facts())
     except Exception as e:
