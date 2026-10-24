@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     # Cap on each chat reply (max_completion_tokens); 0 = provider default
     llm_max_output_tokens: int = 1500
 
+    # Venue the app trades and reads by default (see saraf/venues); tools and endpoints can name another
+    default_venue: str = "wallex"
+
+    # ---- Venue credentials, one block per venue
     # Wallex
     wallex_base_url: str = "https://api.wallex.ir"
     wallex_api_key: str = ""
@@ -35,7 +39,7 @@ class Settings(BaseSettings):
     # Futures endpoints are not in the public docs; plug them in here once known.
     wallex_futures_base_url: str = ""
 
-    # Trading mode: "paper" simulates fills against live Wallex prices, "live" sends real orders.
+    # Trading mode: "paper" simulates fills against the venue's live prices, "live" sends real orders.
     spot_mode: Literal["paper", "live"] = "paper"
     futures_mode: Literal["paper", "live"] = "paper"
     require_confirmation: bool = True

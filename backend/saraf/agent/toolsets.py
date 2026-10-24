@@ -3,7 +3,7 @@
 Spot order tools are always sent: gating them on keywords missed phrasings like «تبدیل کن» and the
 assistant then told the user it couldn't place the order.
 
-All 35 schemas cost ~4.5k tokens on every LLM step, and most questions ("قیمت تتر") need only the
+All 36 schemas cost ~4.5k tokens on every LLM step, and most questions ("قیمت تتر") need only the
 read-only market tools. Heavier groups join once the conversation mentions them and stay for the rest
 of the session, so follow-ups ("ببندش", "حالا شورت بزن") keep working.
 """

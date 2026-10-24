@@ -1,4 +1,4 @@
-"""Market data feeds. LiveFeed reads Wallex in real time; SimFeed replays recorded history
+"""Market data feeds. LiveFeed reads a venue in real time; SimFeed replays recorded history
 with a moving clock. The engine only sees this interface, so its logic is identical in
 backtest, shadow and live runs."""
 
@@ -14,7 +14,7 @@ from ..brokers.base import safe_float
 from ..market.analytics import order_book_analysis
 from ..market.sentiment import global_fear_greed
 from ..news.web import crypto_news
-from ..wallex import WallexClient
+from ..venues import Venue
 from .features import Bar, closed, resample, to_bars
 from .markets import CREDIT_BLOCKED, split_symbol
 
@@ -33,8 +33,8 @@ def _symbols(csv_text: str) -> list[str]:
 
 
 class LiveFeed:
-    def __init__(self, client: WallexClient, settings):
-        self.client, self.s = client, settings
+    def __init__(self, venue: Venue, settings):
+        self.venue, self.s = venue, settings
         self.tf = settings.engine_timeframe_min
         self._news: dict[str, tuple[float, list[str]]] = {}
         self._quotes: dict[str, tuple[float, dict]] = {}
@@ -49,7 +49,7 @@ class LiveFeed:
             syms = [s for s in _symbols(self.s.engine_universe) if s not in blocked]
         else:
             rows = []
-            for sym, m in (await self.client.markets()).items():
+            for sym, m in (await self.venue.markets()).items():
                 if m["quoteAsset"] != self.s.engine_quote or split_symbol(sym)[0] in EXCLUDED_BASES or sym in blocked:
                     continue
                 st = m.get("stats") or {}
@@ -63,8 +63,8 @@ class LiveFeed:
 
     async def bars(self, symbol: str) -> tuple[list[Bar], list[Bar]]:
         now = int(self.now())
-        m1 = to_bars(await self.client.candles(symbol, "1", now - 86_340, now))
-        h1 = to_bars(await self.client.candles(symbol, "60", now - 6 * 86_400, now))
+        m1 = to_bars(await self.venue.candles(symbol, "1", now - 86_340, now))
+        h1 = to_bars(await self.venue.candles(symbol, "60", now - 6 * 86_400, now))
         return closed(resample(m1, self.tf), self.tf, now), closed(h1, 60, now)
 
     async def quote(self, symbol: str) -> dict:
@@ -74,10 +74,10 @@ class LiveFeed:
         hit = self._quotes.get(symbol)
         if hit and hit[0] > time.monotonic():
             return hit[1]
-        st = (await self.client.markets())[symbol]["stats"]
+        st = (await self.venue.markets())[symbol]["stats"]
         last = safe_float(st.get("lastPrice"))
         try:
-            book = await self.client.depth(symbol)
+            book = await self.venue.depth(symbol)
             bid = max(safe_float(l["price"]) for l in book["bid"])
             ask = min(safe_float(l["price"]) for l in book["ask"])
         except Exception:
@@ -91,7 +91,7 @@ class LiveFeed:
         return {"low": q["bid"], "high": q["bid"], "open": q["bid"]}
 
     async def book(self, symbol: str) -> dict:
-        ob = await order_book_analysis(self.client, symbol, 5)
+        ob = await order_book_analysis(self.venue, symbol, 5)
         if "error" in ob:
             return {"error": ob["error"]}
         b1 = ob["bands"]["1%"]
@@ -104,7 +104,7 @@ class LiveFeed:
         # breadth of the markets the satellite trades: on TMN markets every coin moves with USDT/TMN, so a weak
         # toman read as broad strength (and a strong one as a sell-off) for a USDT satellite. SimFeed measures
         # breadth on the traded universe too, so backtest and live now apply the same gate.
-        rows = [m for s, m in (await self.client.markets()).items()
+        rows = [m for s, m in (await self.venue.markets()).items()
                 if m["quoteAsset"] == self.s.engine_quote and split_symbol(s)[0] not in EXCLUDED_BASES]
         changes = [(safe_float(m["stats"].get("24h_ch")), safe_float(m["stats"].get("24h_quoteVolume"))) for m in rows]
         changes = [c for c in changes if c[1] > 0]
@@ -135,7 +135,7 @@ class LiveFeed:
         return heads
 
     async def min_notional(self, symbol: str) -> float:
-        return safe_float((await self.client.markets())[symbol].get("minNotional")) or 50_000
+        return safe_float((await self.venue.markets())[symbol].get("minNotional")) or 50_000
 
 
 class SimFeed:
@@ -212,7 +212,7 @@ class SimFeed:
         return self.m1[symbol][i:k]
 
 
-async def load_history(client: WallexClient, symbols: list[str], start: int, end: int, cache_dir: Path,
+async def load_history(venue: Venue, symbols: list[str], start: int, end: int, cache_dir: Path,
                        warmup_hours: int = 150, tf_minutes: int = 15) -> tuple[dict, dict]:
     """1m bars in day chunks (Wallex returns at most 1440 per call) and 1h bars with warm-up,
     cached on disk so reruns are offline and identical."""
@@ -240,7 +240,7 @@ async def load_history(client: WallexClient, symbols: list[str], start: int, end
             complete = d + 86_400 <= time.time() - 120
             key = f"{sym}_1m_{d}" if complete else f"{sym}_1m_{d}_partial"
             async with sem:
-                rows += await cached(key, lambda d=d: client.candles(sym, "1", d, d + 86_340))
+                rows += await cached(key, lambda d=d: venue.candles(sym, "1", d, d + 86_340))
             d += 86_400
         hrows: list[dict] = []
         h = start - warmup_hours * 3600
@@ -249,7 +249,7 @@ async def load_history(client: WallexClient, symbols: list[str], start: int, end
             complete = hend <= time.time() - 3600
             key = f"{sym}_1h_{h}_{hend}" if complete else f"{sym}_1h_{h}_partial"
             async with sem:
-                hrows += await cached(key, lambda h=h, hend=hend: client.candles(sym, "60", h, hend))
+                hrows += await cached(key, lambda h=h, hend=hend: venue.candles(sym, "60", h, hend))
             h = hend
         m1[sym] = sorted({b.t: b for b in to_bars(rows) if b.t < end}.values(), key=lambda b: b.t)
         h1[sym] = sorted({b.t: b for b in to_bars(hrows) if b.t < end}.values(), key=lambda b: b.t)

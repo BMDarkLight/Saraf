@@ -14,7 +14,7 @@ from saraf.config import ROOT, get_settings
 from saraf.engine.feeds import LiveFeed, load_history
 from saraf.engine.features import closed, compute, resample
 from saraf.engine.strategy import candidates
-from saraf.wallex import WallexClient
+from saraf.venues.wallex import WallexClient
 
 GRID = [(1.0, 2.0), (1.5, 2.0), (1.5, 3.0), (2.0, 3.0), (2.0, 4.0), (2.5, 5.0)]
 

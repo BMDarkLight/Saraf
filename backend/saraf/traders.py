@@ -1,4 +1,5 @@
-"""Live trader personas: follow real traders' public positions on Hyperliquid and copy them on Wallex (simulated).
+"""Live trader personas: follow real traders' public positions on Hyperliquid and copy them on a venue (simulated;
+the default venue, Wallex, unless DEFAULT_VENUE says otherwise).
 
 Hyperliquid is an on-chain perpetuals exchange: every account's open positions and fills are public through its
 info API (no key). The followed traders are either picked from its public leaderboard by verified profit, or added by
@@ -6,9 +7,9 @@ the owner by address. A trader is shown by the name they set on Hyperliquid them
 the address; an address is never labelled as a known person otherwise.
 
 Each followed trader gets a shadow session (data/engine/trader-<address prefix>): every minute their open positions
-are read, their long positions in coins Wallex lists on USDT markets become target weights (their leverage dropped:
+are read, their long positions in coins the venue lists on USDT markets become target weights (their leverage dropped:
 the weights are capped at 100% of our capital), and a simulated portfolio is moved toward those weights at the live
-Wallex prices with the account's real fees. Shorts cannot be copied on Wallex spot: those coins stay in USDT. Every
+venue prices with the account's real fees. Shorts cannot be copied on a spot venue: those coins stay in USDT. Every
 change in the trader's positions is logged with what the copy did about it.
 
   uv run python -m saraf.traders run        # the saraf-traders service: all followers in one process
@@ -27,7 +28,7 @@ import httpx
 
 from .config import ROOT, Settings
 from .engine.journal import Journal
-from .wallex import WallexClient
+from .venues import Venue, create
 
 HL_INFO = "https://api.hyperliquid.xyz/info"
 HL_BOARD = "https://stats-data.hyperliquid.xyz/Mainnet/leaderboard"
@@ -50,8 +51,8 @@ def run_name(address: str) -> str:
     return f"trader-{address.lower()[2:10]}"
 
 
-def wallex_base(coin: str) -> str | None:
-    """Hyperliquid perp coin -> Wallex base asset. kPEPE/kBONK are quoted per 1000 tokens (weights don't care);
+def venue_base(coin: str) -> str | None:
+    """Hyperliquid perp coin -> the venue's base asset. kPEPE/kBONK are quoted per 1000 tokens (weights don't care);
     "@107"-style names are Hyperliquid spot pairs, not followed."""
     if coin.startswith("@"):
         return None
@@ -152,8 +153,8 @@ def pick_leaders(rows: list[dict], n: int = LEADERS) -> list[dict]:
 
 async def pick_copyable(hl: "Hyperliquid", rows: list[dict], tradable: set[str], n: int = LEADERS,
                         min_long: float = 0.10, pool: int = 40) -> list[dict]:
-    """Among the consistently profitable large accounts, the ones a Wallex spot copy can actually follow right now:
-    at least `min_long` of their account in longs on Wallex USDT markets (a book of shorts copies to plain USDT).
+    """Among the consistently profitable large accounts, the ones a spot copy on the venue can actually follow right now:
+    at least `min_long` of their account in longs on the venue's USDT markets (a book of shorts copies to plain USDT).
     Ranked by 30-day profit; if fewer qualify, the most profitable of the rest fill the list."""
     cands = pick_leaders(rows, n=pool)
     good, rest = [], []
@@ -201,18 +202,18 @@ def followed(directory: Path = DIR) -> list[dict]:
 
 # ------------------------------------------------------------------------------------------------- the copy
 def target_weights(pos: dict, tradable: set[str]) -> tuple[dict[str, float], list[str]]:
-    """The trader's long positions as weights of their account, on Wallex USDT markets, capped at 100% in total.
+    """The trader's long positions as weights of their account, on the venue's USDT markets, capped at 100% in total.
     Returns ({symbol: weight}, notes on what cannot be copied)."""
     acct = pos["account_usd"]
     weights: dict[str, float] = {}
     skipped = []
     for p in pos["positions"]:
-        base = wallex_base(p["coin"])
+        base = venue_base(p["coin"])
         sym = f"{base}USDT" if base else None
         if p["side"] == "short":
             skipped.append(f"{p['coin']} short")
         elif not sym or sym not in tradable:
-            skipped.append(f"{p['coin']} not on Wallex")
+            skipped.append(f"{p['coin']} not on the venue")
         elif acct > 0:
             weights[sym] = weights.get(sym, 0.0) + p["usd"] / acct
     total = sum(weights.values())
@@ -270,12 +271,12 @@ class Follower:
         old = self.state["positions"]
         if old is not None:
             for ch in describe_changes(old, pos["positions"]):
-                base = wallex_base(ch["coin"])
+                base = venue_base(ch["coin"])
                 copyable = ch["side"] == "long" and base and f"{base}USDT" in prices
                 self.journal.log("trader", now, symbol=f"{base}USDT" if base else ch["coin"], **ch,
                                  copied=bool(copyable),
                                  reason=f"{ch['action']} {ch['side']} {ch['coin']} ${ch['usd']:,.0f}"
-                                        + ("" if copyable else " (not copyable on Wallex spot)"))
+                                        + ("" if copyable else " (not copyable on spot)"))
         self.state["positions"] = pos["positions"]
         weights, _ = target_weights(pos, set(prices))
         eq = self.equity_usdt(prices)
@@ -345,8 +346,9 @@ class Follower:
 
 
 # ------------------------------------------------------------------------------------------------- the service
-async def wallex_prices(client: WallexClient) -> tuple[dict[str, dict], float, float]:
-    m = await client.markets()
+async def venue_prices(venue: Venue) -> tuple[dict[str, dict], float, float]:
+    """Bid/ask of the venue's USDT markets, and the USDT/TMN bid and ask."""
+    m = await venue.markets()
     prices = {}
     for sym, v in m.items():
         if v.get("quoteAsset") != "USDT":
@@ -362,7 +364,7 @@ async def wallex_prices(client: WallexClient) -> tuple[dict[str, dict], float, f
 
 async def run(s: Settings, directory: Path = DIR, max_loops: int | None = None) -> None:
     hl = Hyperliquid()
-    client = WallexClient(s.wallex_base_url)
+    venue = create(s.default_venue, s)
     followers: dict[str, Follower] = {}
     board: dict[str, dict] = {}
     last_fills: dict[str, float] = {}
@@ -373,9 +375,9 @@ async def run(s: Settings, directory: Path = DIR, max_loops: int | None = None) 
             now = time.time()
             sel = load_json(directory / "selection.json", {})
             try:
-                prices, rate_bid, rate_ask = await wallex_prices(client)
+                prices, rate_bid, rate_ask = await venue_prices(venue)
             except Exception as e:
-                print(f"[traders] wallex prices failed: {e}", flush=True)
+                print(f"[traders] {venue.name} prices failed: {e}", flush=True)
                 await asyncio.sleep(POLL_SECONDS)
                 continue
             # daily (books change), and every 10 minutes while the pick is empty (a failed or empty leaderboard read)
@@ -410,7 +412,7 @@ async def run(s: Settings, directory: Path = DIR, max_loops: int | None = None) 
             await asyncio.sleep(POLL_SECONDS if max_loops is None else 0)
     finally:
         await hl.aclose()
-        await client.aclose()
+        await venue.aclose()
 
 
 if __name__ == "__main__":

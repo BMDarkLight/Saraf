@@ -1,4 +1,4 @@
-"""Smoke test: call every read-only tool + a paper trade round-trip against live Wallex data."""
+"""Smoke test: call every read-only tool + a paper trade round-trip against the default venue's live data."""
 import asyncio, json, os, sys, tempfile
 from pathlib import Path
 
@@ -37,7 +37,7 @@ async def main():
     await call(agent, s, "spot_place_order", symbol="BTCUSDT", side="BUY", quote_amount=99999, reason="too big")
     ok, res, conf = await call(agent, s, "futures_open_position", symbol="ETHUSDT", side="LONG", leverage=5, margin=40,
                                 stop_loss=1, reason="smoke")
-    t = await ctx.client.markets(); px = float(t["ETHUSDT"]["stats"]["lastPrice"])
+    t = await ctx.venue.markets(); px = float(t["ETHUSDT"]["stats"]["lastPrice"])
     ok, res, conf = await call(agent, s, "futures_open_position", symbol="ETHUSDT", side="LONG", leverage=5, margin=40,
                                 stop_loss=round(px*0.97, 2), take_profit=round(px*1.05, 2), reason="smoke")
     a = await agent.execute_action(conf["id"], True); print("   ->", a.status, str(a.result)[:150])
@@ -46,6 +46,6 @@ async def main():
     ok, res, conf = await call(agent, s, "futures_close_position", position_id=pid, fraction=1, reason="smoke")
     a = await agent.execute_action(conf["id"], True); print("   ->", a.status, str(a.result)[:150])
     await call(agent, s, "spot_balances")
-    await ctx.client.aclose()
+    await ctx.venues.aclose()
 
 asyncio.run(main())

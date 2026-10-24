@@ -21,12 +21,14 @@ def main() -> None:
     sub = p.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("backtest")
     b.add_argument("--days", type=float, default=14)
+    b.add_argument("--venue", help="venue whose history to replay (default: DEFAULT_VENUE, wallex)")
     b.add_argument("--end", help="ISO end time (UTC); default = last full hour")
     b.add_argument("--decider", choices=["ai", "rules", "both"], default="both")
     b.add_argument("--symbols", help="comma-separated; default = current auto universe")
     b.add_argument("--offline", action="store_true", help="AI decisions from cache only (exact replay)")
     b.add_argument("--persona", help="apply a copy-trading persona's preset (saraf/personas.py)")
     r = sub.add_parser("run")
+    r.add_argument("--venue", help="venue to trade and read (default: DEFAULT_VENUE, wallex)")
     r.add_argument("--mode", choices=["shadow", "live"], default=None)
     r.add_argument("--confirm-live", action="store_true")
     r.add_argument("--hours", type=float, help="stop after this many hours (shadow sessions); positions are closed to TMN")
@@ -37,6 +39,8 @@ def main() -> None:
     rep.add_argument("dir")
     a = p.parse_args()
     s = get_settings()
+    if getattr(a, "venue", None):
+        s = s.model_copy(update={"default_venue": a.venue.lower()})
     if getattr(a, "persona", None):
         from ..personas import BY_ID, run_name
         from ..tuning import validate

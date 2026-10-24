@@ -11,7 +11,7 @@ import time
 
 import httpx
 
-from ..wallex import WallexClient
+from ..venues import Venue
 from .analytics import market_overview, order_book_analysis, technical_analysis
 
 _fng_cache: tuple[float, dict] | None = None
@@ -46,9 +46,9 @@ async def global_fear_greed(days: int = 7) -> dict:
     return out
 
 
-async def market_pulse(client: WallexClient, quote: str = "USDT") -> dict:
+async def market_pulse(venue: Venue, quote: str = "USDT") -> dict:
     """0-100 fear/greed index from the venue's own markets (top 50 by volume)."""
-    rows = await market_overview(client, quote=quote, sort_by="volume", limit=50)
+    rows = await market_overview(venue, quote=quote, sort_by="volume", limit=50)
     rows = [r for r in rows if r["last"]]
     if not rows:
         return {"error": "no market data"}
@@ -74,17 +74,17 @@ async def market_pulse(client: WallexClient, quote: str = "USDT") -> dict:
     }
 
 
-async def market_risk(client: WallexClient, symbol: str) -> dict:
+async def market_risk(venue: Venue, symbol: str) -> dict:
     """0 (low) - 100 (high) risk score for a single market."""
-    ta = await technical_analysis(client, symbol, "60", 200)
-    ob = await order_book_analysis(client, symbol)
+    ta = await technical_analysis(venue, symbol, "60", 200)
+    ob = await order_book_analysis(venue, symbol)
     if "error" in ta or "error" in ob:
         return {"symbol": symbol.upper(), "error": ta.get("error") or ob.get("error")}
     atr_pct = ta["atr_pct"] or 0
     vol_score = min(atr_pct / 3, 1)                     # 3%/hour ATR -> max
     spread_score = min(ob["spread_pct"] / 1.0, 1)        # 1% spread -> max
     depth_1pct = ob["bands"]["1%"]["bid_value"] + ob["bands"]["1%"]["ask_value"]
-    m = (await client.markets()).get(symbol.upper(), {})
+    m = (await venue.markets()).get(symbol.upper(), {})
     quote = m.get("quoteAsset", "USDT")
     ref_depth = 50_000 if quote == "USDT" else 5_000_000_000
     liq_score = 1 - min(depth_1pct / ref_depth, 1)

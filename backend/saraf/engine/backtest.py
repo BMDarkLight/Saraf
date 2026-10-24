@@ -1,4 +1,4 @@
-"""Backtesting: replay recorded Wallex history through the exact live Engine code.
+"""Backtesting: replay a venue's recorded history through the exact live Engine code.
 
 Fills: market orders at the next 1-minute price +- half the spread (snapshot of current
 spreads), plus slippage and the configured fee. Stops/targets are checked against each
@@ -19,7 +19,7 @@ from pathlib import Path
 from ..brokers.base import safe_float
 from ..config import ROOT, Settings
 from ..market.sentiment import global_fear_greed
-from ..wallex import WallexClient
+from ..venues import create
 from .core import Engine
 from .decider import AIDecider, ResponseCache, RuleDecider
 from .execution import SimExec
@@ -70,12 +70,12 @@ def counterfactual(feed: SimFeed, run_dir: Path, fee: float, horizon_s: int) -> 
 
 async def run_backtest(s: Settings, days: float, end: float | None = None, kinds: tuple[str, ...] = ("rules", "ai"),
                        symbols: list[str] | None = None, offline: bool = False, out_root: Path | None = None) -> dict:
-    client = WallexClient(s.wallex_base_url, s.wallex_api_key, sub_account=s.wallex_sub_account_client_id)
+    venue = create(s.default_venue, s)
     end = end or (time.time() // 3600) * 3600
     start = end - days * 86_400
     try:
         if not symbols:
-            symbols = await LiveFeed(client, s).universe()
+            symbols = await LiveFeed(venue, s).universe()
         if s.engine_quote == "USDT" and "USDTTMN" not in symbols:   # values the USDT core in TMN
             symbols = [*symbols, "USDTTMN"]
         # Historical spreads don't exist, so a snapshot stands in for them. It is saved per window
@@ -84,7 +84,7 @@ async def run_backtest(s: Settings, days: float, end: float | None = None, kinds
         spreads = json.loads(spread_file.read_text()) if spread_file.exists() else {}
         missing = [sym for sym in symbols if sym not in spreads]
         if missing:
-            markets = await client.markets()
+            markets = await venue.markets()
             for sym in missing:
                 st = markets.get(sym, {}).get("stats", {})
                 bid, ask = safe_float(st.get("bidPrice")), safe_float(st.get("askPrice"))
@@ -92,7 +92,7 @@ async def run_backtest(s: Settings, days: float, end: float | None = None, kinds
             spread_file.parent.mkdir(parents=True, exist_ok=True)
             spread_file.write_text(json.dumps(spreads, indent=1))
         spreads = {sym: spreads[sym] for sym in symbols}
-        m1, h1 = await load_history(client, symbols, int(start), int(end), ROOT / "data" / "history",
+        m1, h1 = await load_history(venue, symbols, int(start), int(end), ROOT / "data" / "history",
                                     tf_minutes=s.engine_timeframe_min)
         try:
             fg = await global_fear_greed(int(days) + 10)
@@ -100,7 +100,7 @@ async def run_backtest(s: Settings, days: float, end: float | None = None, kinds
         except Exception:
             fng = {}
     finally:
-        await client.aclose()
+        await venue.aclose()
 
     stamp = datetime.fromtimestamp(end, timezone.utc).strftime("%Y%m%d-%H%M")
     out_root = out_root or (ROOT / "data" / "backtests")

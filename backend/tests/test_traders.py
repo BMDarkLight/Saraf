@@ -7,7 +7,7 @@ import httpx
 import pytest
 
 from saraf import traders
-from saraf.traders import Follower, Hyperliquid, describe_changes, pick_leaders, target_weights, wallex_base
+from saraf.traders import Follower, Hyperliquid, describe_changes, pick_leaders, target_weights, venue_base
 
 PRICES = {"BTCUSDT": {"bid": 99.9, "ask": 100.1}, "ETHUSDT": {"bid": 9.99, "ask": 10.01},
           "PEPEUSDT": {"bid": 0.00001, "ask": 0.0000101}}
@@ -19,15 +19,15 @@ def pos(*ps, account=1_000_000.0):
                           for c, side, size, usd in ps]}
 
 
-def test_coin_names_map_to_wallex_bases():
-    assert wallex_base("BTC") == "BTC" and wallex_base("kPEPE") == "PEPE" and wallex_base("@107") is None
+def test_coin_names_map_to_venue_bases():
+    assert venue_base("BTC") == "BTC" and venue_base("kPEPE") == "PEPE" and venue_base("@107") is None
 
 
 def test_only_longs_on_wallex_markets_are_copied_and_leverage_is_dropped():
     w, skipped = target_weights(pos(("BTC", "long", 1, 300_000), ("ETH", "short", 1, 200_000), ("HYPE", "long", 1, 100_000),
                                     ("kPEPE", "long", 1, 100_000)), set(PRICES))
     assert w == {"BTCUSDT": 0.3, "PEPEUSDT": 0.1}
-    assert skipped == ["ETH short", "HYPE not on Wallex"]
+    assert skipped == ["ETH short", "HYPE not on the venue"]
     w, _ = target_weights(pos(("BTC", "long", 1, 3_000_000), ("ETH", "long", 1, 1_000_000)), set(PRICES))   # 4x levered
     assert w == pytest.approx({"BTCUSDT": 0.75, "ETHUSDT": 0.25})
 

@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import time
 
-from ..traders import Hyperliquid, describe_changes, target_weights, wallex_base
+from ..traders import Hyperliquid, describe_changes, target_weights, venue_base
 
 POLL_SECONDS = 60
 BAND = 0.02
@@ -77,7 +77,7 @@ class FollowCopy:
     async def _tradable(self, coins: list[str]) -> dict[str, dict]:
         out = {}
         for coin in coins:
-            base = wallex_base(coin)
+            base = venue_base(coin)
             if not base:
                 continue
             sym = f"{base}USDT"
@@ -94,7 +94,7 @@ class FollowCopy:
         if st["positions"] is not None:
             for ch in describe_changes(st["positions"], pos["positions"]):
                 side = "لانگ" if ch["side"] == "long" else "شورت"
-                copyable = ch["side"] == "long" and wallex_base(ch["coin"])
+                copyable = ch["side"] == "long" and venue_base(ch["coin"])
                 e.journal.log("trader", now, symbol=ch["coin"], action=ch["action"],
                               reason=f"تریدر {ch['coin']} را {ACTION_FA.get(ch['action'], ch['action'])} ({side}، "
                                      f"{_usd(ch['usd'])})" + ("" if copyable else "؛ شورت در اسپات کپی نمی‌شود"))

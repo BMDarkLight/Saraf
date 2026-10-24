@@ -38,7 +38,7 @@ async def check(ctx: AppContext, tool_name: str, args) -> dict:
             raise RiskViolation("give either quantity (base asset) or quote_amount")
         if args.type == "LIMIT" and not args.price:
             raise RiskViolation("LIMIT orders need a price")
-        q = await MarketInfo(ctx.client).quote(args.symbol)
+        q = await MarketInfo(ctx.venue).quote(args.symbol)
         ref = args.price or (q["ask"] if args.side == "BUY" else q["bid"]) or q["last"]
         notional = args.quote_amount if args.quantity is None else args.quantity * ref
         facts = {"estimated_notional": notional, "quote": q["quote"], "reference_price": ref}
@@ -52,7 +52,7 @@ async def check(ctx: AppContext, tool_name: str, args) -> dict:
             raise RiskViolation("give a position size: margin (collateral in quote asset) or quantity")
         if args.order_type == "LIMIT" and not args.price:
             raise RiskViolation("LIMIT orders need a price")
-        q = await MarketInfo(ctx.client).quote(args.symbol)
+        q = await MarketInfo(ctx.venue).quote(args.symbol)
         ref = args.price or q["mark"]
         notional = args.quantity * ref if args.quantity is not None else (args.margin or 0) * args.leverage
         facts = {"estimated_notional": notional, "quote": q["quote"], "reference_price": ref,

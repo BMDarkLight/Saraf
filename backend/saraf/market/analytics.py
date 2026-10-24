@@ -1,4 +1,4 @@
-"""Market analytics built on Wallex data: movers, order book depth, technicals."""
+"""Market analytics on any venue's data: movers, order book depth, technicals."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import asyncio
 import math
 import time
 
-from ..wallex import WallexClient
+from ..venues import Venue
 
 
 def _f(x) -> float:
@@ -16,11 +16,11 @@ def _f(x) -> float:
         return 0.0
 
 
-async def market_overview(client: WallexClient, quote: str | None = None, sort_by: str = "volume",
+async def market_overview(venue: Venue, quote: str | None = None, sort_by: str = "volume",
                           limit: int = 20, search: str | None = None) -> list[dict]:
     """Snapshot of spot markets from /v1/markets, sortable by volume/change."""
     rows = []
-    for m in (await client.markets()).values():
+    for m in (await venue.markets()).values():
         if quote and m["quoteAsset"] != quote.upper():
             continue
         if search:
@@ -48,7 +48,7 @@ async def market_overview(client: WallexClient, quote: str | None = None, sort_b
 _movers_cache: dict[tuple, tuple[float, list]] = {}
 
 
-async def top_movers(client: WallexClient, hours: int = 4, quote: str = "USDT", limit: int = 10,
+async def top_movers(venue: Venue, hours: int = 4, quote: str = "USDT", limit: int = 10,
                      direction: str = "gainers", universe: int = 60) -> list[dict]:
     """Best/worst performing markets over the last `hours` (1-72), computed from hourly candles.
 
@@ -60,7 +60,7 @@ async def top_movers(client: WallexClient, hours: int = 4, quote: str = "USDT", 
     if hit and hit[0] > time.monotonic():
         rows = hit[1]
     else:
-        candidates = await market_overview(client, quote=quote, sort_by="volume", limit=universe)
+        candidates = await market_overview(venue, quote=quote, sort_by="volume", limit=universe)
         now = int(time.time())
         start = now - hours * 3600 - 3600
         sem = asyncio.Semaphore(12)
@@ -68,7 +68,7 @@ async def top_movers(client: WallexClient, hours: int = 4, quote: str = "USDT", 
         async def scan(m: dict):
             async with sem:
                 try:
-                    cs = await client.candles(m["symbol"], "60", start, now)
+                    cs = await venue.candles(m["symbol"], "60", start, now)
                 except Exception:
                     return None
             cutoff = now - hours * 3600
@@ -89,9 +89,9 @@ async def top_movers(client: WallexClient, hours: int = 4, quote: str = "USDT", 
     return rows[:limit]
 
 
-async def order_book_analysis(client: WallexClient, symbol: str, levels: int = 10) -> dict:
+async def order_book_analysis(venue: Venue, symbol: str, levels: int = 10) -> dict:
     """Order book depth: spread, liquidity bands, imbalance and walls."""
-    book = await client.depth(symbol)
+    book = await venue.depth(symbol)
     asks = [(_f(l["price"]), _f(l["quantity"])) for l in book.get("ask", [])]
     bids = [(_f(l["price"]), _f(l["quantity"])) for l in book.get("bid", [])]
     asks.sort(key=lambda x: x[0])
@@ -172,9 +172,9 @@ def atr(candles: list[dict], period: int = 14) -> float | None:
 RES_SECONDS = {"1": 60, "60": 3600, "180": 10800, "360": 21600, "720": 43200, "1D": 86400}
 
 
-async def technical_analysis(client: WallexClient, symbol: str, resolution: str = "60", bars: int = 200) -> dict:
+async def technical_analysis(venue: Venue, symbol: str, resolution: str = "60", bars: int = 200) -> dict:
     now = int(time.time())
-    cs = await client.candles(symbol, resolution, now - RES_SECONDS[resolution] * bars, now)
+    cs = await venue.candles(symbol, resolution, now - RES_SECONDS[resolution] * bars, now)
     if len(cs) < 30:
         return {"symbol": symbol.upper(), "error": f"not enough candles ({len(cs)}) for analysis"}
     closes = [c["c"] for c in cs]

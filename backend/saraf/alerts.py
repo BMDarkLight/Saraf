@@ -7,12 +7,12 @@ import uuid
 
 from .brokers import MarketInfo
 from .brokers.base import JsonState
-from .wallex import WallexClient
+from .venues import Venue
 
 
 class AlertStore:
-    def __init__(self, client: WallexClient, data_dir):
-        self.info = MarketInfo(client)
+    def __init__(self, venue: Venue, data_dir):
+        self.info = MarketInfo(venue)
         self.state = JsonState(data_dir / "alerts.json", {"alerts": {}})
 
     @property

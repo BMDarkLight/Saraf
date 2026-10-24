@@ -23,12 +23,12 @@ from pydantic import BaseModel
 from .agent import tools as agent_tools
 from .agent.context import AppContext
 from .agent.loop import Agent
-from .brokers import BrokerError, LiveSpotBroker, PaperFuturesBroker, PaperSpotBroker
+from .brokers import BrokerError, PaperFuturesBroker, PaperSpotBroker
 from .config import ROOT, get_settings
 from .market import analytics, sentiment
 from .news import web
 from . import personas as persona_mod, strategy_chat, traders as traders_mod, tuning
-from .wallex import WallexError
+from .venues import Venue, VenueError
 
 settings = get_settings()
 ENGINE_MODE_FILE = ROOT / "data" / "engine" / "mode.env"
@@ -44,8 +44,11 @@ def requested_engine_mode() -> str:
 
 
 # One mode for the whole app: when the engine trades for real, so do the chat assistant's spot trades
-settings.spot_mode = "live" if requested_engine_mode() == "live" and settings.wallex_api_key else "paper"
+settings.spot_mode = "paper"
 ctx = AppContext.build(settings)
+if requested_engine_mode() == "live" and ctx.venue.has_key and ctx.venue.capabilities.trading:
+    settings.spot_mode = "live"
+    ctx.spot = ctx.venue.live_spot_broker()
 agent = Agent(ctx)
 futures_events: collections.deque = collections.deque(maxlen=50)
 
@@ -74,7 +77,7 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(_ticker())
     yield
     task.cancel()
-    await ctx.client.aclose()
+    await ctx.venues.aclose()
 
 
 app = FastAPI(title="Saraf", lifespan=lifespan)
@@ -96,7 +99,7 @@ def sse(gen):
 async def guarded(coro):
     try:
         return await coro
-    except (WallexError, BrokerError) as e:
+    except (VenueError, BrokerError) as e:
         raise HTTPException(502, str(e))
 
 
@@ -188,62 +191,80 @@ async def delete_session(session_id: str):
 async def config():
     return {"spot_mode": settings.spot_mode, "futures_mode": settings.futures_mode,
             "model": settings.llm_model, "require_confirmation": settings.require_confirmation,
-            "has_wallex_key": bool(settings.wallex_api_key), "llm_configured": bool(settings.llm_api_key),
+            "venue": ctx.venue.name, "has_venue_key": ctx.venue.has_key, "llm_configured": bool(settings.llm_api_key),
             "max_leverage": settings.max_leverage, "tools": sorted(agent_tools.TOOLS),
             "engine_mode": (engine_status() or {}).get("mode") or requested_engine_mode()}
 
 
 # --------------------------------------------------------------- dashboard
+def pick_venue(name: str | None) -> Venue:
+    try:
+        return ctx.market(name)
+    except VenueError as e:
+        raise HTTPException(404, str(e))
+
+
+@app.get("/api/venues")
+async def venues():
+    """Every registered venue with its capabilities; `default` marks the one brokers and the engine use."""
+    return ctx.venues.describe()
+
+
 @app.get("/api/markets")
-async def markets(quote: str | None = None, sort: str = "volume", limit: int = 30, search: str | None = None):
-    return await guarded(analytics.market_overview(ctx.client, quote, sort, limit, search))
+async def markets(quote: str | None = None, sort: str = "volume", limit: int = 30, search: str | None = None,
+                  venue: str | None = None):
+    return await guarded(analytics.market_overview(pick_venue(venue), quote, sort, limit, search))
 
 
 @app.get("/api/movers")
-async def movers(hours: int = 4, quote: str = "USDT", direction: str = "gainers", limit: int = 10):
-    return await guarded(analytics.top_movers(ctx.client, hours, quote, limit, direction))
+async def movers(hours: int = 4, quote: str = "USDT", direction: str = "gainers", limit: int = 10,
+                 venue: str | None = None):
+    return await guarded(analytics.top_movers(pick_venue(venue), hours, quote, limit, direction))
 
 
-async def known_symbol(symbol: str) -> str:
+async def known_symbol(symbol: str, v: Venue) -> str:
     sym = symbol.upper()
-    if sym not in await guarded(ctx.client.markets()):
-        raise HTTPException(404, f"unknown market {sym}")
+    if sym not in await guarded(v.markets()):
+        raise HTTPException(404, f"unknown market {sym} on {v.title}")
     return sym
 
 
 @app.get("/api/depth/{symbol}")
-async def depth(symbol: str, levels: int = 12):
-    sym = await known_symbol(symbol)
-    return await guarded(analytics.order_book_analysis(ctx.client, sym, max(1, min(levels, 50))))
+async def depth(symbol: str, levels: int = 12, venue: str | None = None):
+    v = pick_venue(venue)
+    sym = await known_symbol(symbol, v)
+    return await guarded(analytics.order_book_analysis(v, sym, max(1, min(levels, 50))))
 
 
 @app.get("/api/trades/{symbol}")
-async def market_trades(symbol: str, limit: int = 30):
+async def market_trades(symbol: str, limit: int = 30, venue: str | None = None):
     """The market's latest public trades (newest first) for the trade tape."""
-    sym = await known_symbol(symbol)
-    rows = await guarded(ctx.client.trades(sym))
+    v = pick_venue(venue)
+    sym = await known_symbol(symbol, v)
+    rows = await guarded(v.trades(sym))
     out = [{"time": t.get("timestamp"), "price": float(t["price"]), "qty": float(t["quantity"]),
             "side": "buy" if t.get("isBuyOrder") else "sell"} for t in rows[: max(1, min(limit, 100))]]
     return {"symbol": sym, "trades": out}
 
 
 @app.get("/api/candles/{symbol}")
-async def candles(symbol: str, resolution: str = "60", bars: int = 150):
+async def candles(symbol: str, resolution: str = "60", bars: int = 150, venue: str | None = None):
     if resolution not in analytics.RES_SECONDS:
         raise HTTPException(400, f"resolution must be one of {sorted(analytics.RES_SECONDS)}")
-    sym = await known_symbol(symbol)
+    v = pick_venue(venue)
+    sym = await known_symbol(symbol, v)
     bars = max(1, min(bars, 1000))
     now = int(time.time())
-    return await guarded(ctx.client.candles(sym, resolution, now - analytics.RES_SECONDS[resolution] * bars, now))
+    return await guarded(v.candles(sym, resolution, now - analytics.RES_SECONDS[resolution] * bars, now))
 
 
 @app.get("/api/sentiment")
-async def sentiment_ep(quote: str = "USDT"):
+async def sentiment_ep(quote: str = "USDT", venue: str | None = None):
     try:
         glob = await sentiment.global_fear_greed(30)
     except Exception as e:
         glob = {"error": str(e)}
-    return {"global": glob, "market_pulse": await guarded(sentiment.market_pulse(ctx.client, quote))}
+    return {"global": glob, "market_pulse": await guarded(sentiment.market_pulse(pick_venue(venue), quote))}
 
 
 @app.get("/api/news")
@@ -257,13 +278,13 @@ async def portfolio():
     try:
         out["spot"] = await agent_tools.spot_balances(ctx, agent_tools.NoArgs())
         out["spot_orders"] = await ctx.spot.open_orders()
-    except (WallexError, BrokerError) as e:
+    except (VenueError, BrokerError) as e:
         out["spot_error"] = str(e)
     try:
         out["futures"] = await ctx.futures.account()
         out["positions"] = await ctx.futures.positions()
         out["futures_orders"] = await ctx.futures.open_orders()
-    except (WallexError, BrokerError) as e:
+    except (VenueError, BrokerError) as e:
         out["futures_error"] = str(e)
     return out
 
@@ -366,7 +387,7 @@ def _write_mode(mode: str) -> None:
     ENGINE_MODE_FILE.write_text(f"ENGINE_RUN_ARGS={MODE_ARGS[mode]}\n")
     # the chat assistant follows the engine: real spot orders in live, paper in shadow
     settings.spot_mode = "live" if mode == "live" else "paper"
-    ctx.spot = LiveSpotBroker(ctx.client) if mode == "live" else PaperSpotBroker(ctx.client, settings)
+    ctx.spot = ctx.venue.live_spot_broker() if mode == "live" else PaperSpotBroker(ctx.venue, settings)
 
 
 async def _restart_engine() -> None:
@@ -460,30 +481,31 @@ async def schedule_strategy_live(body: StrategyScheduleIn):
     return {"ok": True, "live_at": at.timestamp()}
 
 
-_key_check: dict = {"at": 0.0, "main": None}
+_key_check: dict = {"at": 0.0, "warning": None}
 
 
-async def check_trading_key() -> bool:
-    """Is a main-account key configured for a trade-credit sub-account? (orders would fail with 1006)"""
-    if not (settings.wallex_api_key and settings.wallex_sub_account_client_id):
-        return False
-    if time.time() - _key_check["at"] > 600 or _key_check["main"] is None:
-        _key_check.update(at=time.time(), main=await ctx.client.key_is_main_account())
-    ctx.key_is_main = bool(_key_check["main"])
-    return ctx.key_is_main
+async def check_trading_key() -> str | None:
+    """The default venue's warning about its API key, if any (e.g. a Wallex main-account key configured for a
+    trade-credit sub-account: orders would fail with 1006). Checked at most every 10 minutes."""
+    if not ctx.venue.has_key:
+        return None
+    if time.time() - _key_check["at"] > 600:
+        _key_check.update(at=time.time(), warning=await ctx.venue.account_warning())
+    ctx.key_is_main = bool(_key_check["warning"])
+    return _key_check["warning"]
 
 
 @app.get("/api/account")
 async def account():
-    """The real Wallex account (trade-credit sub-account when configured), read-only, plus the engine."""
-    out: dict = {"has_key": bool(settings.wallex_api_key), "sub_account": bool(settings.wallex_sub_account_client_id)}
-    if await check_trading_key():
-        out["key_warning"] = ("کلید API فعلی مال حساب اصلی است؛ موجودی اعتبار معاملاتی را می‌خواند ولی سفارش‌ها با موجودی "
-                              "حساب اصلی سنجیده و رد می‌شوند. برای حساب «هکاتون» یک کلید API با دسترسی معامله بسازید.")
-    if settings.wallex_api_key:
+    """The real account on the default venue (read-only), plus the engine."""
+    out: dict = {"venue": ctx.venue.name, "has_key": ctx.venue.has_key,
+                 "sub_account": bool(getattr(ctx.venue, "sub_account", ""))}
+    if warning := await check_trading_key():
+        out["key_warning"] = warning
+    if ctx.venue.has_key and ctx.venue.capabilities.account:
         try:
-            out["spot"] = await agent_tools.value_balances(ctx, await LiveSpotBroker(ctx.client).balances())
-        except (WallexError, BrokerError) as e:
+            out["spot"] = await agent_tools.value_balances(ctx, await ctx.venue.live_spot_broker().balances())
+        except (VenueError, BrokerError) as e:
             out["error"] = str(e)
     try:
         out["engine"] = engine_status()
@@ -491,8 +513,8 @@ async def account():
         out["engine_error"] = str(e)
     eng = out.get("engine")
     if eng and eng["positions"]:
-        with contextlib.suppress(WallexError):
-            markets = await ctx.client.markets()
+        with contextlib.suppress(VenueError):
+            markets = await ctx.venue.markets()
             usdt_tmn = float((markets.get("USDTTMN") or {}).get("stats", {}).get("lastPrice") or 0)
             for p in eng["positions"]:   # mark open positions to the last price
                 last = float((markets.get(p["symbol"]) or {}).get("stats", {}).get("lastPrice") or 0)
@@ -575,7 +597,7 @@ async def strategy():
     usdt = []
     if pts:
         with contextlib.suppress(Exception):   # the benchmark is optional; the panel works without it
-            candles = await ctx.client.candles("USDTTMN", "60", pts[0][0] - 3600, int(time.time()))
+            candles = await ctx.venue.candles("USDTTMN", "60", pts[0][0] - 3600, int(time.time()))
             usdt = [(c["t"], c["c"]) for c in candles]
     bench, j = [], 0
     for t, _ in pts:
@@ -588,16 +610,16 @@ async def strategy():
     # what the engine manages vs coins bought outside it (by hand / the chat): the latter is not the satellite
     managed = 0.0
     if eng["positions"]:
-        with contextlib.suppress(WallexError, KeyError, ValueError, TypeError):
-            markets = await ctx.client.markets()
+        with contextlib.suppress(VenueError, KeyError, ValueError, TypeError):
+            markets = await ctx.venue.markets()
             usdt_tmn = float(markets["USDTTMN"]["stats"]["lastPrice"])
             for p in eng["positions"]:
                 last = float(markets[p["symbol"]]["stats"]["lastPrice"])
                 managed += last * p["qty"] * (usdt_tmn if p.get("quote") == "USDT" else 1.0)
     follow = (eng.get("follow") or {}).get("holdings") or {}
     if follow:   # a copied trader's coins are the engine's, not "outside the engine"
-        with contextlib.suppress(WallexError, KeyError, ValueError, TypeError):
-            markets = await ctx.client.markets()
+        with contextlib.suppress(VenueError, KeyError, ValueError, TypeError):
+            markets = await ctx.venue.markets()
             usdt_tmn = float(markets["USDTTMN"]["stats"]["lastPrice"])
             for sym, qty in follow.items():
                 managed += float(markets[sym]["stats"]["lastPrice"]) * qty * usdt_tmn

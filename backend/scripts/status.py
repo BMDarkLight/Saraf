@@ -17,10 +17,9 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from saraf.brokers import LiveSpotBroker
 from saraf.brokers.base import safe_float
 from saraf.config import ROOT, get_settings
-from saraf.wallex import WallexClient
+from saraf.venues.wallex import WallexClient
 
 SHOW = ("engine_quote", "engine_decider", "engine_end_time", "engine_fee_rate", "engine_maker_fee_rate",
         "engine_max_exposure_pct", "engine_max_position_pct", "engine_max_positions", "engine_risk_per_trade_pct",
@@ -124,7 +123,7 @@ async def market_facts() -> None:
             except Exception as e:
                 print("fees error:", e)
             try:
-                bal = await LiveSpotBroker(c).balances()
+                bal = await c.live_spot_broker().balances()
                 print("live balances (free, locked):", {a: (round(b["free"], 8), round(b["locked"], 8)) for a, b in bal.items()})
                 print("open orders:", json.dumps([{k: o.get(k) for k in ("symbol", "side", "type", "price", "origQty",
                                                                         "executedQty", "status", "clientOrderId")}

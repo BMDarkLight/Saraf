@@ -1,8 +1,8 @@
-"""Run the web app on fake but realistic data, for UI work without the Wallex API (and for screenshots).
+"""Run the web app on fake but realistic data, for UI work without a venue's API (and for screenshots).
 
   uv run python scripts/ui_demo.py            # http://127.0.0.1:8000
-Writes sample engine journals under data/engine (git-ignored) and patches the Wallex client, the real-account
-broker and the sentiment feed with deterministic fakes. Never use it on the VPS: it overwrites data/engine.
+Writes sample engine journals under data/engine (git-ignored) and swaps the default venue (Wallex-shaped data), its
+real-account broker and the sentiment feed with deterministic fakes. Never use it on the VPS: it overwrites data/engine.
 """
 
 from __future__ import annotations
@@ -28,6 +28,9 @@ class DemoClient(FakeClient):
         super().__init__()
         self.prices = dict(PRICES)
         self.has_key = True
+
+    def live_spot_broker(self):
+        return DemoAccountBroker(self)
 
     async def markets(self):
         out = await super().markets()
@@ -164,16 +167,15 @@ def main() -> None:
 
     write_journals(server.ROOT / "data" / "engine")
     client = DemoClient()
-    server.ctx.client = client
-    server.ctx.spot.client = client
-    server.ctx.futures.client = client
-    server.LiveSpotBroker = DemoAccountBroker
-    server.settings.wallex_api_key = "demo"
-    server.settings.wallex_sub_account_client_id = "demo"
+    server.ctx.venue = client
+    server.ctx.venues._open[client.name] = client
+    server.ctx.spot.venue = server.ctx.spot.info.venue = client
+    server.ctx.futures.venue = server.ctx.futures.info.venue = client
+    server.ctx.alerts.info.venue = client
     server.settings.llm_api_key = server.settings.llm_api_key or "demo"
 
     async def no_key_check():
-        return False
+        return None
     server.check_trading_key = no_key_check
 
     async def no_restart():   # saving settings would restart the systemd engine; the demo has none

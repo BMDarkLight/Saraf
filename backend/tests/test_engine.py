@@ -265,7 +265,7 @@ async def test_universe_skips_credit_blocked_markets(tmp_path):
 
 async def test_client_sends_sub_account_header_on_auth_calls():
     import httpx
-    from saraf.wallex import WallexClient
+    from saraf.venues.wallex import WallexClient
 
     seen = []
 
@@ -475,7 +475,7 @@ async def test_coins_bought_outside_the_engine_do_not_fill_the_satellite_cap(tmp
 async def test_network_errors_name_the_exception():
     """Live 2026-10-22 17:52-18:00 UTC: 'network error calling /v1/account/balances: ' - a timeout with no text."""
     import httpx
-    from saraf.wallex import WallexClient, WallexError
+    from saraf.venues.wallex import WallexClient, WallexError
 
     def handler(req):
         raise httpx.ReadTimeout("")

@@ -6,10 +6,10 @@ import asyncio
 import os
 import subprocess
 
-from ..brokers import LiveSpotBroker, PaperSpotBroker
+from ..brokers import PaperSpotBroker
 from ..brokers.spot import PAPER_FEE
 from ..config import ROOT, Settings
-from ..wallex import WallexClient
+from ..venues import create
 from .backtest import make_decider
 from .core import Engine
 from .execution import SpotExec
@@ -35,25 +35,27 @@ def git_commit() -> str:
 
 async def run_engine(s: Settings, mode: str, confirm_live: bool = False, max_loops: int | None = None,
                      hours: float | None = None, name: str | None = None) -> None:
-    client = WallexClient(s.wallex_base_url, s.wallex_api_key, sub_account=s.wallex_sub_account_client_id)
+    venue = create(s.default_venue, s)
     if name and not valid_run_name(name):
         raise SystemExit("--name must be a plain name (letters, digits, - and _) other than live/shadow")
     out = ROOT / "data" / "engine" / (name or mode)
     out.mkdir(parents=True, exist_ok=True)
     if mode == "live":
-        if not (s.wallex_api_key and confirm_live):
-            raise SystemExit("live mode needs WALLEX_API_KEY and the --confirm-live flag")
-        spot = LiveSpotBroker(client)
+        if not (venue.capabilities.trading and venue.has_key and confirm_live):
+            raise SystemExit(f"live mode needs a venue that trades, its API key (e.g. WALLEX_API_KEY) and "
+                             f"the --confirm-live flag ({venue.title}: trading={venue.capabilities.trading}, "
+                             f"key={venue.has_key})")
+        spot = venue.live_spot_broker()
     else:  # shadow: real-time data, fills simulated on the live order book, no real orders
-        spot = PaperSpotBroker(client, s.model_copy(update={"data_dir": out, "paper_tmn": s.engine_capital_tmn,
+        spot = PaperSpotBroker(venue, s.model_copy(update={"data_dir": out, "paper_tmn": s.engine_capital_tmn,
                                                             "paper_usdt": 0.0}))
     journal = Journal(out, echo=True)
     fee = PAPER_FEE if mode != "live" else s.maker_fee
-    engine = Engine(s, LiveFeed(client, s), SpotExec(spot, fee, quote=s.engine_quote), make_decider(s, s.engine_decider), journal,
+    engine = Engine(s, LiveFeed(venue, s), SpotExec(spot, fee, quote=s.engine_quote), make_decider(s, s.engine_decider), journal,
                     state_path=out / "state.json", control_path=None if name else out.parent / "control.json")
     await engine.reconcile()
     snapshot = {k: v for k, v in s.model_dump(mode="json").items() if k.startswith(("engine_", "llm_")) and k not in SECRET_FIELDS}
-    journal.log("start", engine.feed.now(), mode=mode, name=name or mode, commit=git_commit(), config=snapshot)
+    journal.log("start", engine.feed.now(), mode=mode, venue=venue.name, name=name or mode, commit=git_commit(), config=snapshot)
 
     tf_s = s.engine_timeframe_min * 60
     last_bar = int(engine.feed.now() // tf_s)
@@ -83,4 +85,4 @@ async def run_engine(s: Settings, mode: str, confirm_live: bool = False, max_loo
             await asyncio.sleep(s.engine_monitor_seconds)
     finally:
         engine.save()
-        await client.aclose()
+        await venue.aclose()

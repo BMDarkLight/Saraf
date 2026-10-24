@@ -35,7 +35,7 @@ async def show_comparison_chart(ctx: AppContext, a: CompareArgs):
 
     async def load(sym: str):
         try:
-            cs = await ctx.client.candles(sym, res, start, now)
+            cs = await ctx.venue.candles(sym, res, start, now)
         except Exception:
             return None
         if not cs or not cs[0]["o"]:
@@ -60,7 +60,7 @@ class HeatmapArgs(BaseModel):
 @tool("show_market_heatmap", "GENERATIVE UI: render a market heatmap (tile size = 24h volume, color = 24h change). "
       "Use for 'how is the market', overview or sector questions.", HeatmapArgs)
 async def show_market_heatmap(ctx: AppContext, a: HeatmapArgs):
-    rows = await analytics.market_overview(ctx.client, quote=a.quote, sort_by="volume", limit=a.limit)
+    rows = await analytics.market_overview(ctx.venue, quote=a.quote, sort_by="volume", limit=a.limit)
     tiles = [{"symbol": r["symbol"], "name": r["fa_name"] or r["name"], "change": r["change_24h"],
               "volume": r["quote_volume_24h"], "last": r["last"]} for r in rows if r["last"]]
     up = sum(1 for t in tiles if t["change"] > 0)
@@ -87,7 +87,7 @@ class ChartArgs(BaseModel):
 @tool("show_price_chart", "GENERATIVE UI: show a candlestick chart in the chat with your own annotated price levels "
       "(support/resistance/entry/TP/SL). Use after analysis to visualize the levels you mention.", ChartArgs)
 async def show_price_chart(ctx: AppContext, a: ChartArgs):
-    q = await MarketInfo(ctx.client).quote(a.symbol)
+    q = await MarketInfo(ctx.venue).quote(a.symbol)
     return {"ui": {"component": "price_chart", "symbol": q["symbol"], "resolution": a.resolution,
                    "levels": [lv.model_dump() for lv in a.levels], "title": a.title},
             "last_price": q["last"], "levels_drawn": len(a.levels)}
@@ -111,12 +111,11 @@ class TicketArgs(BaseModel):
       "leverage/TP/SL and submit it (it then goes through the risk guard and confirmation). Use when the user "
       "wants to trade but details are open, or to let them tweak your suggestion.", TicketArgs)
 async def show_trade_ticket(ctx: AppContext, a: TicketArgs):
-    q = await MarketInfo(ctx.client).quote(a.symbol)
+    q = await MarketInfo(ctx.venue).quote(a.symbol)
     max_lev = None
     if a.market == "futures":
-        detail = {m["symbol"]: m for m in await ctx.client.markets_detail()}
-        m = detail.get(q["symbol"], {})
-        max_lev = min(float(m.get("max_leverage") or 1), ctx.settings.max_leverage) if m.get("is_margin") else None
+        lev = {m["symbol"]: m["max_leverage"] for m in await ctx.venue.futures_markets()}
+        max_lev = min(float(lev[q["symbol"]]), ctx.settings.max_leverage) if q["symbol"] in lev else None
     side = a.side if a.market == "spot" else ("LONG" if a.side in ("BUY", "LONG") else "SHORT")
     if a.market == "spot":
         side = "BUY" if a.side in ("BUY", "LONG") else "SELL"
@@ -143,9 +142,9 @@ class PlannerArgs(BaseModel):
       "margin, TP and SL; shows liquidation price, PnL at TP/SL and R:R live. Use when the user is planning a "
       "leveraged trade or asks 'what if'.", PlannerArgs)
 async def show_position_planner(ctx: AppContext, a: PlannerArgs):
-    q = await MarketInfo(ctx.client).quote(a.symbol)
+    q = await MarketInfo(ctx.venue).quote(a.symbol)
     entry = a.entry or q["mark"]
-    ta = await analytics.technical_analysis(ctx.client, a.symbol, "60")
+    ta = await analytics.technical_analysis(ctx.venue, a.symbol, "60")
     atr = ta.get("atr14") or entry * 0.01
     sign = 1 if a.side == "LONG" else -1
     sl = a.stop_loss or entry - sign * 1.5 * atr

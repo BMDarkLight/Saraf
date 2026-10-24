@@ -1,28 +1,37 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from ..alerts import AlertStore
-from ..brokers import FuturesBroker, LiveSpotBroker, PaperFuturesBroker, PaperSpotBroker, SpotBroker, WallexFuturesBroker
+from ..brokers import FuturesBroker, PaperFuturesBroker, PaperSpotBroker, SpotBroker
 from ..config import Settings
-from ..wallex import WallexClient
+from ..venues import Venue, Venues
 
 
 @dataclass
 class AppContext:
     settings: Settings
-    client: WallexClient
+    venue: Venue                  # the default venue: brokers, alerts and portfolio values use it
     spot: SpotBroker
     futures: FuturesBroker
     alerts: AlertStore
-    # set by the server: the API key is the main account's while a trade-credit sub-account is configured
+    # set by the server: the venue flagged its API key (e.g. a Wallex main-account key for a trade-credit account)
     key_is_main: bool = False
+    venues: Venues | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.venues is None:
+            self.venues = Venues(self.settings, self.venue)
+
+    def market(self, name: str | None = None) -> Venue:
+        """A venue for read-only market data: the default one, or another registered venue by name."""
+        return self.venue if not name or name.lower() == self.venue.name else self.venues.get(name)
 
     @classmethod
     def build(cls, settings: Settings) -> "AppContext":
-        client = WallexClient(settings.wallex_base_url, settings.wallex_api_key,
-                              sub_account=settings.wallex_sub_account_client_id)
-        spot = LiveSpotBroker(client) if settings.spot_mode == "live" else PaperSpotBroker(client, settings)
-        futures = (WallexFuturesBroker(client, settings.wallex_futures_base_url)
-                   if settings.futures_mode == "live" else PaperFuturesBroker(client, settings))
-        return cls(settings, client, spot, futures, AlertStore(client, settings.data_dir))
+        venues = Venues(settings)
+        venue = venues.default
+        spot = venue.live_spot_broker() if settings.spot_mode == "live" else PaperSpotBroker(venue, settings)
+        futures = (venue.live_futures_broker(settings) if settings.futures_mode == "live"
+                   else PaperFuturesBroker(venue, settings))
+        return cls(settings, venue, spot, futures, AlertStore(venue, settings.data_dir), venues=venues)

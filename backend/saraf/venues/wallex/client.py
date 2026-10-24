@@ -1,8 +1,9 @@
-"""Async client for the public Wallex REST API (https://api-docs.wallex.ir).
+"""The Wallex venue: an async client for the public Wallex REST API (https://api-docs.wallex.ir).
 
 Covers market data, account, spot orders and OTC (instant) trades. Every method
 returns the unwrapped `result` payload of Wallex's `{success, message, result}`
-envelope and raises `WallexError` on failure.
+envelope and raises `WallexError` on failure. Its market data is already in
+Saraf's shared venue schema (venues/base.py).
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ from typing import Any
 import json as json_lib
 
 import httpx
+
+from ..base import Capabilities, Venue, VenueError
 
 ORDER_ERROR_CODES = {
     1001: "price precision not accepted",
@@ -32,11 +35,8 @@ ORDER_ERROR_CODES = {
 CANDLE_RESOLUTIONS = {"1", "60", "180", "360", "720", "1D"}
 
 
-class WallexError(Exception):
-    def __init__(self, message: str, status: int | None = None, payload: Any = None):
-        super().__init__(message)
-        self.status = status
-        self.payload = payload
+class WallexError(VenueError):
+    pass
 
 
 class _TTLCache:
@@ -53,7 +53,17 @@ class _TTLCache:
         self._data[key] = (time.monotonic() + ttl, value)
 
 
-class WallexClient:
+KEY_WARNING = ("کلید API فعلی مال حساب اصلی است؛ موجودی اعتبار معاملاتی را می‌خواند ولی سفارش‌ها با موجودی "
+               "حساب اصلی سنجیده و رد می‌شوند. برای حساب «هکاتون» یک کلید API با دسترسی معامله بسازید.")
+
+
+class WallexClient(Venue):
+    name = "wallex"
+    title = "Wallex"
+    title_fa = "والکس"
+    capabilities = Capabilities(asset_class="crypto", candles=tuple(sorted(CANDLE_RESOLUTIONS)), trading=True,
+                                futures=True, account=True)
+
     def __init__(self, base_url: str = "https://api.wallex.ir", api_key: str = "", timeout: float = 15.0,
                  sub_account: str = ""):
         self.api_key = api_key
@@ -159,6 +169,13 @@ class WallexClient:
         res = await self._cached("hector_markets", 30, lambda: self._request("GET", "/hector/web/v1/markets"))
         return res["markets"]
 
+    async def futures_markets(self) -> list[dict]:
+        return [{"symbol": m["symbol"], "max_leverage": float(m.get("max_leverage") or 1), "price": m.get("price")}
+                for m in await self.markets_detail() if m.get("is_margin")]
+
+    async def coin_stats(self, key: str) -> Any:
+        return await self.currencies_stats(key)
+
     async def currencies_stats(self, key: str) -> Any:
         """Global stats for one coin (the endpoint now requires `key`, unlike the docs)."""
         return await self._cached(f"currency:{key}", 60,
@@ -208,6 +225,17 @@ class WallexClient:
         if r.status_code != 200:
             return None
         return not any(float(b.get("value") or 0) for b in own.values())
+
+    async def account_warning(self) -> str | None:
+        return KEY_WARNING if self.has_key and await self.key_is_main_account() else None
+
+    def live_spot_broker(self):
+        from .brokers import WallexSpotBroker
+        return WallexSpotBroker(self)
+
+    def live_futures_broker(self, settings):
+        from .brokers import WallexFuturesBroker
+        return WallexFuturesBroker(self, settings.wallex_futures_base_url)
 
     async def profile(self) -> dict:
         return await self._request("GET", "/v1/account/profile", auth=True)

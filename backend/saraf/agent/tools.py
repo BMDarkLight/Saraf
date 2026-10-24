@@ -85,36 +85,46 @@ class NoArgs(BaseModel):
     pass
 
 
-Symbol = Field(description="Wallex market symbol, e.g. BTCUSDT, ETHTMN, USDTTMN")
+Symbol = Field(description="market symbol on the venue, e.g. BTCUSDT, ETHTMN, USDTTMN")
+
+
+class VenueArg(BaseModel):
+    venue: str | None = Field(None, description="venue to read (see list_venues); omit for the default venue")
 
 
 # =========================================================== market data
-class ListMarketsArgs(BaseModel):
-    quote: Literal["USDT", "TMN"] | None = Field(None, description="filter by quote asset")
+@tool("list_venues", "Venues Saraf can read: crypto exchanges, stock exchange, currency rates, with what each "
+      "supports (trading, futures, order book, candle resolutions). The default venue is where orders go.", NoArgs)
+async def list_venues(ctx: AppContext, a: NoArgs):
+    return ctx.venues.describe()
+
+
+class ListMarketsArgs(VenueArg):
+    quote: Literal["USDT", "TMN", "IRR"] | None = Field(None, description="filter by quote asset")
     sort_by: Literal["volume", "change", "-change", "change_7d", "-change_7d"] = Field(
         "volume", description="volume, change (24h gainers), -change (24h losers), change_7d, -change_7d")
     limit: int = Field(15, ge=1, le=100)
     search: str | None = Field(None, description="filter by symbol or coin name (English or Persian)")
 
 
-@tool("list_markets", "List Wallex spot markets with price, 24h/7d change and volume. Use to find symbols, "
+@tool("list_markets", "List spot markets on a venue with price, 24h/7d change and volume. Use to find symbols, "
       "or for 24h gainers/losers and most traded markets.", ListMarketsArgs)
 async def list_markets(ctx: AppContext, a: ListMarketsArgs):
-    return await analytics.market_overview(ctx.client, a.quote, a.sort_by, a.limit, a.search)
+    return await analytics.market_overview(ctx.market(a.venue), a.quote, a.sort_by, a.limit, a.search)
 
 
-class TickerArgs(BaseModel):
+class TickerArgs(VenueArg):
     symbol: str = Symbol
 
 
 @tool("get_ticker", "Live price snapshot for one market: last, bid/ask, 24h high/low/change/volume.", TickerArgs)
 async def get_ticker(ctx: AppContext, a: TickerArgs):
-    rows = await analytics.market_overview(ctx.client, search=a.symbol, limit=200)
+    rows = await analytics.market_overview(ctx.market(a.venue), search=a.symbol, limit=200)
     exact = [r for r in rows if r["symbol"] == a.symbol.upper()]
     return exact[0] if exact else {"error": f"market {a.symbol} not found", "did_you_mean": [r["symbol"] for r in rows[:5]]}
 
 
-class MoversArgs(BaseModel):
+class MoversArgs(VenueArg):
     hours: int = Field(4, ge=1, le=72, description="look-back window in hours")
     quote: Literal["USDT", "TMN"] = "USDT"
     direction: Literal["gainers", "losers"] = Field(
@@ -124,13 +134,13 @@ class MoversArgs(BaseModel):
 
 
 @tool("top_movers", "Most profitable (gainers) or worst (losers) markets over the last N hours, computed "
-      "from hourly candles across the most liquid Wallex markets.", MoversArgs)
+      "from hourly candles across the venue's most liquid markets.", MoversArgs)
 async def top_movers(ctx: AppContext, a: MoversArgs):
     return {"window_hours": a.hours, "quote": a.quote, "direction": a.direction,
-            "markets": await analytics.top_movers(ctx.client, a.hours, a.quote, a.limit, a.direction)}
+            "markets": await analytics.top_movers(ctx.market(a.venue), a.hours, a.quote, a.limit, a.direction)}
 
 
-class DepthArgs(BaseModel):
+class DepthArgs(VenueArg):
     symbol: str = Symbol
     levels: int = Field(10, ge=1, le=50, description="price levels per side to return")
 
@@ -138,24 +148,24 @@ class DepthArgs(BaseModel):
 @tool("order_book", "Order book depth analysis: spread, liquidity within 0.5/1/2/5% of mid, bid/ask "
       "imbalance, large walls and top levels.", DepthArgs)
 async def order_book(ctx: AppContext, a: DepthArgs):
-    return await analytics.order_book_analysis(ctx.client, a.symbol, a.levels)
+    return await analytics.order_book_analysis(ctx.market(a.venue), a.symbol, a.levels)
 
 
-class TradesArgs(BaseModel):
+class TradesArgs(VenueArg):
     symbol: str = Symbol
     limit: int = Field(20, ge=1, le=100)
 
 
 @tool("recent_trades", "Latest public trades on a market, with buy/sell flow summary.", TradesArgs)
 async def recent_trades(ctx: AppContext, a: TradesArgs):
-    trades = (await ctx.client.trades(a.symbol))[: a.limit]
+    trades = (await ctx.market(a.venue).trades(a.symbol))[: a.limit]
     buy = sum(float(t["sum"]) for t in trades if t.get("isBuyOrder"))
     sell = sum(float(t["sum"]) for t in trades if not t.get("isBuyOrder"))
     return {"symbol": a.symbol.upper(), "buy_value": buy, "sell_value": sell,
             "buy_share_pct": round(100 * buy / (buy + sell), 1) if buy + sell else None, "trades": trades}
 
 
-class CandlesArgs(BaseModel):
+class CandlesArgs(VenueArg):
     symbol: str = Symbol
     resolution: Resolution = Field("60", description="1=1m, 60=1h, 1D=daily")
     bars: int = Field(48, ge=5, le=500)
@@ -164,11 +174,11 @@ class CandlesArgs(BaseModel):
 @tool("get_candles", "OHLCV candles for a market (use technical_analysis for indicators).", CandlesArgs)
 async def get_candles(ctx: AppContext, a: CandlesArgs):
     now = int(time.time())
-    cs = await ctx.client.candles(a.symbol, a.resolution, now - analytics.RES_SECONDS[a.resolution] * a.bars, now)
+    cs = await ctx.market(a.venue).candles(a.symbol, a.resolution, now - analytics.RES_SECONDS[a.resolution] * a.bars, now)
     return {"symbol": a.symbol.upper(), "resolution": a.resolution, "candles": cs[-a.bars:]}
 
 
-class TAArgs(BaseModel):
+class TAArgs(VenueArg):
     symbol: str = Symbol
     resolution: Resolution = "60"
 
@@ -176,10 +186,10 @@ class TAArgs(BaseModel):
 @tool("technical_analysis", "Indicators for a market: trend, EMA20/50, RSI14, MACD, ATR, Bollinger bands, "
       "support/resistance.", TAArgs)
 async def technical_analysis(ctx: AppContext, a: TAArgs):
-    return await analytics.technical_analysis(ctx.client, a.symbol, a.resolution)
+    return await analytics.technical_analysis(ctx.market(a.venue), a.symbol, a.resolution)
 
 
-class FGArgs(BaseModel):
+class FGArgs(VenueArg):
     quote: Literal["USDT", "TMN"] = "USDT"
 
 
@@ -190,13 +200,13 @@ async def fear_greed_index(ctx: AppContext, a: FGArgs):
         glob = await sentiment.global_fear_greed()
     except Exception as e:
         glob = {"error": str(e)}
-    return {"global": glob, "market_pulse": await sentiment.market_pulse(ctx.client, a.quote)}
+    return {"global": glob, "market_pulse": await sentiment.market_pulse(ctx.market(a.venue), a.quote)}
 
 
 @tool("market_risk", "Risk score (0-100) for a market from volatility, liquidity, spread and RSI extremes, "
       "with suggested max leverage and stop distance.", TickerArgs)
 async def market_risk(ctx: AppContext, a: TickerArgs):
-    return await sentiment.market_risk(ctx.client, a.symbol)
+    return await sentiment.market_risk(ctx.market(a.venue), a.symbol)
 
 
 class CoinArgs(BaseModel):
@@ -206,7 +216,7 @@ class CoinArgs(BaseModel):
 @tool("global_coin_stats", "Global market stats for coins: rank, market cap, dominance, ATH, 1h-1y changes.", CoinArgs)
 async def global_coin_stats(ctx: AppContext, a: CoinArgs):
     if a.coin:
-        return await ctx.client.currencies_stats(a.coin)
+        return await ctx.venue.coin_stats(a.coin)
     async with httpx.AsyncClient(timeout=15) as http:
         r = await http.get("https://api.coingecko.com/api/v3/coins/markets", params={
             "vs_currency": "usd", "per_page": 15, "price_change_percentage": "1h,24h,7d,30d"})
@@ -258,7 +268,7 @@ async def spot_balances(ctx: AppContext, a: NoArgs):
 
 async def value_balances(ctx: AppContext, bals: dict) -> dict:
     """Adds value_usdt to each balance and totals in USDT and TMN (at last prices)."""
-    markets = await ctx.client.markets()
+    markets = await ctx.venue.markets()
 
     def px(asset: str, quote: str) -> float:
         if asset == quote:
@@ -307,8 +317,8 @@ async def futures_history(ctx: AppContext, a: NoArgs):
 
 @tool("futures_markets", "Markets that support leverage (futures) and their max leverage.", NoArgs)
 async def futures_markets(ctx: AppContext, a: NoArgs):
-    return {m["symbol"]: {"max_leverage": m.get("max_leverage"), "price": m.get("price")}
-            for m in await ctx.client.markets_detail() if m.get("is_margin")}
+    return {m["symbol"]: {"max_leverage": m["max_leverage"], "price": m["price"]}
+            for m in await ctx.venue.futures_markets()}
 
 
 # ================================================================ trading
@@ -444,7 +454,7 @@ class AlertArgs(BaseModel):
       AlertArgs)
 async def create_price_alert(ctx: AppContext, a: AlertArgs):
     from ..brokers import MarketInfo
-    q = await MarketInfo(ctx.client).quote(a.symbol)
+    q = await MarketInfo(ctx.venue).quote(a.symbol)
     return ctx.alerts.create(q["symbol"], a.condition, a.price, a.note, q["last"])
 
 

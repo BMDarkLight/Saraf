@@ -1,10 +1,8 @@
 """Futures (leveraged) trading.
 
-Wallex's public API docs don't cover futures yet, so there are two brokers:
-- PaperFuturesBroker: a full isolated-margin perpetuals simulator priced off live
-  Wallex order books, restricted to the markets Wallex flags as leverage-enabled.
-- WallexFuturesBroker: the live adapter. Its endpoints are placeholders until the
-  real futures API is published; every method raises with a clear message.
+PaperFuturesBroker is a full isolated-margin perpetuals simulator priced off a venue's live
+order books, restricted to the markets the venue flags as leverage-enabled (Venue.futures_markets).
+Live futures brokers belong to their venue (Venue.live_futures_broker).
 """
 
 from __future__ import annotations
@@ -13,8 +11,8 @@ import time
 import uuid
 
 from ..config import Settings
-from ..wallex import WallexClient
-from .base import BrokerError, FuturesBroker, JsonState, MarketInfo
+from ..venues.base import Venue
+from .base import BrokerError, FuturesBroker, JsonState, MarketInfo, state_path
 
 TAKER_FEE = 0.0006
 MAINT_MARGIN = 0.005
@@ -33,19 +31,18 @@ def liquidation_price(side: str, entry: float, leverage: float) -> float:
 class PaperFuturesBroker(FuturesBroker):
     mode = "paper"
 
-    def __init__(self, client: WallexClient, settings: Settings):
-        self.client = client
-        self.info = MarketInfo(client)
+    def __init__(self, venue: Venue, settings: Settings):
+        self.venue = venue
+        self.info = MarketInfo(venue)
         self.settings = settings
         self.state = JsonState(
-            settings.data_dir / "paper_futures.json",
+            state_path(settings, venue, "paper_futures"),
             {"wallets": {"USDT": settings.paper_usdt, "TMN": settings.paper_tmn},
              "positions": {}, "orders": {}, "history": []},
         )
 
     async def leverage_markets(self) -> dict[str, float]:
-        return {m["symbol"]: float(m.get("max_leverage") or 1)
-                for m in await self.client.markets_detail() if m.get("is_margin")}
+        return {m["symbol"]: float(m.get("max_leverage") or 1) for m in await self.venue.futures_markets()}
 
     async def _validate(self, symbol: str, leverage: float) -> float:
         lev_markets = await self.leverage_markets()
@@ -262,43 +259,3 @@ class PaperFuturesBroker(FuturesBroker):
     def reset(self, usdt: float, tmn: float) -> None:
         self.state.data = {"wallets": {"USDT": usdt, "TMN": tmn}, "positions": {}, "orders": {}, "history": []}
         self.state.save()
-
-
-class WallexFuturesBroker(FuturesBroker):
-    """Live Wallex futures adapter — wire the real endpoints in here once available."""
-
-    mode = "live"
-
-    def __init__(self, client: WallexClient, base_url: str):
-        self.client = client
-        self.base_url = base_url
-
-    def _unavailable(self):
-        raise BrokerError(
-            "Live Wallex futures endpoints are not in the public API docs yet. "
-            "Set FUTURES_MODE=paper, or implement WallexFuturesBroker with the real endpoints."
-        )
-
-    async def account(self):
-        self._unavailable()
-
-    async def positions(self):
-        self._unavailable()
-
-    async def open_position(self, *a, **k):
-        self._unavailable()
-
-    async def close_position(self, *a, **k):
-        self._unavailable()
-
-    async def set_tp_sl(self, *a, **k):
-        self._unavailable()
-
-    async def open_orders(self):
-        self._unavailable()
-
-    async def cancel_order(self, *a, **k):
-        self._unavailable()
-
-    async def history(self, limit: int = 20):
-        self._unavailable()

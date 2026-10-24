@@ -1,4 +1,4 @@
-"""Shared fixtures. `FakeClient` is a deterministic stand-in for the Wallex API whose
+"""Shared fixtures. `FakeClient` is a deterministic stand-in venue (shaped like Wallex's market data) whose
 prices tests can move, so fills, TP/SL and liquidations are exactly reproducible."""
 
 import pytest
@@ -7,6 +7,7 @@ from saraf.agent.context import AppContext
 from saraf.alerts import AlertStore
 from saraf.brokers import PaperFuturesBroker, PaperSpotBroker
 from saraf.config import Settings
+from saraf.venues import Capabilities, Venue
 
 
 def make_settings(tmp_path, **over) -> Settings:
@@ -19,7 +20,11 @@ def make_settings(tmp_path, **over) -> Settings:
     return Settings(**base)
 
 
-class FakeClient:
+class FakeClient(Venue):
+    name = "wallex"   # stands in for the default venue
+    title = "Fake"
+    capabilities = Capabilities(asset_class="crypto", futures=True)
+    has_key = False   # tests flip it per instance
     SPREAD = 0.002  # 0.2%
 
     def __init__(self):
@@ -51,9 +56,9 @@ class FakeClient:
             }
         return out
 
-    async def markets_detail(self):
-        return [{"symbol": s, "is_margin": s in self.leverage, "max_leverage": self.leverage.get(s, 1),
-                 "price": str(p)} for s, p in self.prices.items()]
+    async def futures_markets(self):
+        return [{"symbol": s, "max_leverage": self.leverage[s], "price": str(p)}
+                for s, p in self.prices.items() if s in self.leverage]
 
     async def depth(self, symbol):
         if symbol in self.books:

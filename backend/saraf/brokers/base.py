@@ -1,5 +1,5 @@
-"""Broker interfaces. The agent only talks to these, so paper and live
-implementations (and a future real Wallex futures adapter) are interchangeable."""
+"""Broker interfaces. The agent only talks to these, so paper brokers (which work on any venue's market data)
+and a venue's live brokers (venues/<name>/brokers.py) are interchangeable."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
 
-from ..wallex import WallexClient, WallexError
+from ..venues.base import Venue
 
 
 class BrokerError(Exception):
@@ -17,7 +17,7 @@ class BrokerError(Exception):
 
 
 def safe_float(x) -> float:
-    """Wallex returns "-" instead of a number for inactive markets."""
+    """Venues return "-" (Wallex) or nothing instead of a number for inactive markets."""
     try:
         return float(x)
     except (TypeError, ValueError):
@@ -36,11 +36,11 @@ def fmt_num(value: float, decimals: int) -> str:
 class MarketInfo:
     """Symbol metadata + live top-of-book, backed by the cached /v1/markets call."""
 
-    def __init__(self, client: WallexClient):
-        self.client = client
+    def __init__(self, venue: Venue):
+        self.venue = venue
 
     async def get(self, symbol: str) -> dict:
-        markets = await self.client.markets()
+        markets = await self.venue.markets()
         m = markets.get(symbol.upper())
         if not m:
             raise BrokerError(f"unknown market {symbol!r}. Use list_markets/search to find valid symbols.")
@@ -125,8 +125,10 @@ class FuturesBroker(ABC):
         return []
 
 
-def wrap_wallex_error(e: WallexError) -> BrokerError:
-    return BrokerError(f"Wallex: {e}")
+def state_path(settings, venue: Venue, kind: str) -> Path:
+    """A paper broker's state file. The default venue keeps the plain name (existing data dirs resume as before)."""
+    suffix = "" if venue.name == settings.default_venue else f"-{venue.name}"
+    return settings.data_dir / f"{kind}{suffix}.json"
 
 
 def to_jsonable(x: Any) -> Any:

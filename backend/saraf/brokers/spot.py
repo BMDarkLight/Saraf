@@ -7,10 +7,10 @@ import uuid
 from typing import Any
 
 from ..config import Settings
-from ..wallex import WallexClient, WallexError
-from .base import BrokerError, JsonState, MarketInfo, SpotBroker, fmt_num, round_down, safe_float, wrap_wallex_error
+from ..venues.base import Venue
+from .base import BrokerError, JsonState, MarketInfo, SpotBroker, round_down, state_path
 
-PAPER_FEE = 0.002  # Wallex spot taker fee is ~0.2-0.25%
+PAPER_FEE = 0.002  # typical Iranian crypto exchange spot taker fee (Wallex: ~0.2-0.25%)
 
 
 def _now() -> str:
@@ -32,122 +32,16 @@ async def _resolve_quantity(info: dict, side: str, quantity: float | None, quote
     return quantity
 
 
-def market_orders_refused(msg: str) -> bool:
-    """Wallex's answer when a market does not take market orders: «امکان ثبت سفارش قیمت بازار در … وجود ندارد»."""
-    return "قیمت بازار" in msg or "market order" in msg.lower()
-
-
-MAX_WALK = 0.02            # how far through the book a refused market order may go as a limit
-
-LIVE_BUY_HEADROOM = 0.005   # 0.3% taker fee on the challenge account + 0.2% for the ask moving
-
-
-class LiveSpotBroker(SpotBroker):
-    mode = "live"
-
-    def __init__(self, client: WallexClient):
-        self.client = client
-        self.info = MarketInfo(client)
-
-    async def balances(self) -> dict[str, dict]:
-        try:
-            raw = await self.client.balances()
-        except WallexError as e:
-            raise wrap_wallex_error(e)
-        out = {}
-        for asset, b in raw.items():
-            total, locked = float(b.get("value") or 0), float(b.get("locked") or 0)
-            if total or locked:
-                out[asset] = {"free": max(total - locked, 0.0), "locked": locked, "total": total}
-        return out
-
-    async def place_order(self, symbol, side, type, quantity=None, price=None, quote_amount=None) -> dict:
-        side, type = side.upper(), type.upper()
-        info = await self.info.quote(symbol)
-        if side == "BUY" and type == "MARKET" and quantity is None and quote_amount is not None:
-            # "Spend N TMN": Wallex reserves a MARKET buy against a protective price above the ask, so a
-            # near-whole-balance market buy is rejected (error 1006, seen live with 4,975,067 of 5,000,000).
-            # A LIMIT at the live best ask reserves exactly qty x price and fills at once like a market order.
-            book = await self.client.depth(symbol)
-            asks = [safe_float(lv["price"]) for lv in book.get("ask", []) if safe_float(lv["price"])]
-            if asks:   # round up to the tick: a buy limit a hair under the ask would rest instead of filling
-                step = 10 ** info["price_decimals"]
-                type, price = "LIMIT", math.ceil(min(asks) * step - 1e-9) / step
-            quote_amount = quote_amount / (1 + LIVE_BUY_HEADROOM)
-        qty = await _resolve_quantity(info, side, quantity, quote_amount, price)
-        if type == "LIMIT" and price is None:
-            raise BrokerError("LIMIT orders need a price")
-        try:
-            return await self.client.place_order(
-                symbol, side, type, fmt_num(qty, info["qty_decimals"]),
-                price=fmt_num(price, info["price_decimals"]) if type == "LIMIT" else None,
-            )
-        except WallexError as e:
-            if type != "MARKET" or not market_orders_refused(str(e)):
-                raise wrap_wallex_error(e)
-        # some markets refuse market orders (seen live on USOONUSDT): the same order as a LIMIT priced through the
-        # book fills at once at the resting orders' prices; the caller cancels any part that did not fill
-        price = await self._through_book(symbol, side, qty, info["price_decimals"])
-        try:
-            return await self.client.place_order(symbol, side, "LIMIT", fmt_num(qty, info["qty_decimals"]),
-                                                 price=fmt_num(price, info["price_decimals"]))
-        except WallexError as e:
-            raise wrap_wallex_error(e)
-
-    async def _through_book(self, symbol: str, side: str, qty: float, decimals: int) -> float:
-        """The price that fills `qty` against the order book now (the worst level needed), on the tick."""
-        book = await self.client.depth(symbol)
-        levels = book.get("bid" if side == "SELL" else "ask", [])
-        levels = sorted(((safe_float(lv["price"]), safe_float(lv.get("quantity"))) for lv in levels if safe_float(lv["price"])),
-                        reverse=side == "SELL")
-        if not levels:
-            raise BrokerError(f"{symbol}: market orders are refused and the order book is empty")
-        need, price = qty, levels[-1][0]
-        for p, q in levels:
-            price, need = p, need - q
-            if need <= 0:
-                break
-        best = levels[0][0]   # a thin book: go no further than 2% from the best price; the rest is cancelled unfilled
-        price = max(price, best * (1 - MAX_WALK)) if side == "SELL" else min(price, best * (1 + MAX_WALK))
-        step = 10 ** decimals
-        return (math.floor(price * step + 1e-9) if side == "SELL" else math.ceil(price * step - 1e-9)) / step
-
-    async def cancel_order(self, order_id: str) -> dict:
-        try:
-            await self.client.cancel_order(order_id)
-            return {"order_id": order_id, "status": "CANCELED"}
-        except WallexError as e:
-            raise wrap_wallex_error(e)
-
-    async def open_orders(self, symbol=None) -> list[dict]:
-        try:
-            return await self.client.open_orders(symbol)
-        except WallexError as e:
-            raise wrap_wallex_error(e)
-
-    async def get_order(self, order_id: str) -> dict:
-        try:
-            return await self.client.get_order(order_id)
-        except WallexError as e:
-            raise wrap_wallex_error(e)
-
-    async def trades(self, symbol=None) -> list[dict]:
-        try:
-            return await self.client.my_trades(symbol)
-        except WallexError as e:
-            raise wrap_wallex_error(e)
-
-
 class PaperSpotBroker(SpotBroker):
-    """Simulates the Wallex spot matching engine against the live order book."""
+    """Simulates a spot matching engine against the venue's live order book."""
 
     mode = "paper"
 
-    def __init__(self, client: WallexClient, settings: Settings):
-        self.client = client
-        self.info = MarketInfo(client)
+    def __init__(self, venue: Venue, settings: Settings):
+        self.venue = venue
+        self.info = MarketInfo(venue)
         self.state = JsonState(
-            settings.data_dir / "paper_spot.json",
+            state_path(settings, venue, "paper_spot"),
             {"balances": {"USDT": settings.paper_usdt, "TMN": settings.paper_tmn}, "locked": {}, "orders": {}, "trades": []},
         )
 
@@ -174,7 +68,7 @@ class PaperSpotBroker(SpotBroker):
                          budget: float | None = None) -> tuple[float, float]:
         """Fill `qty` against the live book, spending at most `budget` quote (BUY).
         Returns (filled_qty, avg_price)."""
-        book = await self.client.depth(symbol)
+        book = await self.venue.depth(symbol)
         levels = sorted(book["ask"] if side == "BUY" else book["bid"],
                         key=lambda lv: float(lv["price"]), reverse=side == "SELL")
         filled, cost = 0.0, 0.0
@@ -222,7 +116,7 @@ class PaperSpotBroker(SpotBroker):
     async def _top_of_book(self, symbol: str) -> dict:
         """Best bid/ask from the order book; /v1/markets stats lag it (found in shadow testing)."""
         try:
-            book = await self.client.depth(symbol)
+            book = await self.venue.depth(symbol)
             return {"bid": max(float(l["price"]) for l in book["bid"]), "ask": min(float(l["price"]) for l in book["ask"])}
         except Exception:
             return await self.info.quote(symbol)

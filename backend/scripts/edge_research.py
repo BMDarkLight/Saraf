@@ -13,7 +13,7 @@ import time
 
 from saraf.brokers.base import safe_float
 from saraf.engine.markets import CREDIT_BLOCKED
-from saraf.wallex import WallexClient
+from saraf.venues.wallex import WallexClient
 
 FEE = 0.003           # taker, per side, as /v1/account/fee reports for the credit account
 DAY = 86_400

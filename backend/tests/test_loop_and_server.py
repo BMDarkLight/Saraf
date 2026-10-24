@@ -260,7 +260,7 @@ async def test_strategy_endpoint_shows_the_core_run_next_to_live(http, tmp_path,
 
     now = int(time.time())
     monkeypatch.setattr(server, "ROOT", tmp_path)
-    monkeypatch.setitem(server.ctx.client.prices, "USDTTMN", 270_000.0)
+    monkeypatch.setitem(server.ctx.venue.prices, "USDTTMN", 270_000.0)
     monkeypatch.setattr(server, "ENGINE_MODE_FILE", tmp_path / "data/engine/mode.env")
     live, shadow = tmp_path / "data/engine/live", tmp_path / "data/engine/shadow"
     for d, core in ((live, None), (shadow, {"status": "holding", "entry_rate": 270_000})):

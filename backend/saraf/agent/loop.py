@@ -23,7 +23,7 @@ from openai import APIConnectionError, APIStatusError, AsyncOpenAI
 from pydantic import ValidationError
 
 from ..brokers import BrokerError
-from ..wallex import WallexError
+from ..venues import VenueError
 from . import risk
 from .context import AppContext
 from .prompts import system_prompt
@@ -199,7 +199,7 @@ class Agent:
                 facts = await asyncio.wait_for(risk.check(self.ctx, name, args), TOOL_TIMEOUT)
             except risk.RiskViolation as e:
                 return False, {"error": f"blocked by risk guard: {e}"}, None
-            except (BrokerError, WallexError) as e:
+            except (BrokerError, VenueError) as e:
                 return False, {"error": str(e)}, None
             except asyncio.TimeoutError:
                 return False, {"error": f"risk check timed out after {TOOL_TIMEOUT:g}s"}, None
@@ -221,7 +221,7 @@ class Agent:
             return True, _jsonable(result), None
         except asyncio.TimeoutError:
             return False, {"error": f"{name} timed out after {TOOL_TIMEOUT:g}s; try again or use another tool"}, None
-        except (BrokerError, WallexError) as e:
+        except (BrokerError, VenueError) as e:
             return False, {"error": str(e)}, None
         except Exception as e:  # tool bugs shouldn't kill the conversation
             return False, {"error": f"{type(e).__name__}: {e}"}, None
