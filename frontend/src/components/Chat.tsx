@@ -1,3 +1,4 @@
+import { SarafMark } from "./Logo";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -19,7 +20,7 @@ const SUGGESTIONS: [string, string, string][] = [
   ["📊", "نقشه بازار", "یه نقشه حرارتی از بازار تتری نشونم بده"],
   ["⚖️", "عمق بازار", "عمق بازار BTCUSDT رو تحلیل کن؛ فشار خرید بیشتره یا فروش؟"],
   ["🔥", "پربازده‌ها", "سودده‌ترین بازارهای تتری ۴ ساعت اخیر رو لیست کن"],
-  ["🧭", "احساسات بازار", "شاخص ترس و طمع الان چنده و بازار والکس چه وضعی داره؟"],
+  ["🧭", "احساسات بازار", "شاخص ترس و طمع الان چنده و بازار چه وضعی داره؟"],
 ];
 const QUICK: [string, string][] = [
   ["مقایسه BTC و ETH", "عملکرد BTC، ETH و SOL رو در ۷۲ ساعت اخیر روی نمودار مقایسه کن"],
@@ -282,7 +283,7 @@ export const Chat = forwardRef<ChatHandle, { onTrade: () => void; onSymbol: (s: 
             <div className="msg user" key={i}><div className="bubble">{m.text}</div></div>
           ) : (
             <div className="msg" key={i}>
-              <div className="avatar">W</div>
+              <div className="avatar"><SarafMark /></div>
               <div className="bubble">
                 {m.parts.map((p, j) => {
                   if (p.kind === "reasoning")

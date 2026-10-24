@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getJSON } from "./api";
 import { Chat, type ChatHandle } from "./components/Chat";
+import { Wordmark } from "./components/Logo";
 import { AlertToasts } from "./components/Alerts";
 import { FearGreed } from "./components/FearGreed";
 import { Markets } from "./components/Markets";
@@ -102,10 +103,7 @@ export default function App() {
   return (
     <>
       <header className="appbar">
-        <div className="brand">
-          <div className="brand-mark">W</div>
-          <span>والکس <small>ایجنت</small></span>
-        </div>
+        <Wordmark />
         <nav className="seg view-switch" aria-label="بخش">
           <button className={tab === "chat" || tab === "trade" ? "on" : ""} onClick={() => setTab("chat")}>معامله</button>
           <button className={tab === "markets" ? "on" : ""} onClick={() => setTab("markets")}>بازار</button>

@@ -14,7 +14,7 @@ export function Gauge({ value, size = 112 }: { value: number; size?: number }) {
     return `M ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2}`;
   };
   const segs: [number, number, string][] = [
-    [0, 0.25, "var(--down)"], [0.25, 0.45, "#F59E0B"], [0.45, 0.55, "var(--muted)"], [0.55, 0.75, "#22B07D"], [0.75, 1, "var(--up)"],
+    [0, 0.25, "var(--down)"], [0.25, 0.45, "var(--warn)"], [0.45, 0.55, "var(--muted)"], [0.55, 0.75, "var(--series-4)"], [0.75, 1, "var(--up)"],
   ];
   return (
     <svg width={size} height={size / 2 + 10} viewBox={`0 0 ${size} ${size / 2 + 10}`} aria-label={`Fear & Greed ${value}`}>

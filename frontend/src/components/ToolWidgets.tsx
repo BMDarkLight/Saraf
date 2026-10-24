@@ -55,7 +55,7 @@ export function ToolWidget({ name, result }: { name: string; result: any }) {
     );
   }
   if (name === "market_risk" && result.risk_score != null) {
-    const c = result.risk_score >= 75 ? "var(--down)" : result.risk_score >= 55 ? "#F59E0B" : result.risk_score >= 30 ? "var(--blue)" : "var(--up)";
+    const c = result.risk_score >= 75 ? "var(--down)" : result.risk_score >= 55 ? "var(--warn)" : result.risk_score >= 30 ? "var(--info)" : "var(--up)";
     return (
       <div className="widget" style={{ maxWidth: 380 }}>
         <div className="widget-h">شاخص ریسک · <span className="ltr">{result.symbol}</span></div>

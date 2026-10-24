@@ -15,6 +15,18 @@
       "port": 8000
     },
     {
+      "name": "saraf-demo",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": [
+        "run",
+        "--project",
+        "backend",
+        "python",
+        "backend/scripts/ui_demo.py"
+      ],
+      "port": 8000
+    },
+    {
       "name": "mock-llm",
       "runtimeExecutable": "uv",
       "runtimeArgs": [

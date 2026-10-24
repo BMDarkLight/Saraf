@@ -18,12 +18,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tests"))
 
 from conftest import FakeClient  # noqa: E402
 
+from saraf.venues import Capabilities  # noqa: E402
+
 PRICES = {"BTCUSDT": 110_250.0, "ETHUSDT": 3_910.0, "SOLUSDT": 186.4, "XRPUSDT": 2.41, "DOGEUSDT": 0.198,
           "PEPEUSDT": 0.0000101, "BNBUSDT": 1_084.0, "USOONUSDT": 164.2, "USDTTMN": 272_900.0,
           "BTCTMN": 30_100_000_000.0, "ETHTMN": 1_067_000_000.0, "USOONTMN": 44_800_000.0}
 
 
 class DemoClient(FakeClient):
+    capabilities = Capabilities(asset_class="crypto", trading=True, futures=True, account=True)
+
     def __init__(self):
         super().__init__()
         self.prices = dict(PRICES)

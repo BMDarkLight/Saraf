@@ -10,7 +10,7 @@ const ASSET_FA: Record<string, string> = {
   USOON: "نفت توکنیزه", BNB: "بایننس کوین", PEPE: "پپه",
 };
 const ASSET_COLOR: Record<string, string> = { TMN: "var(--muted)", USDT: "var(--s-usdt)" };
-const PALETTE = ["#8b5cf6", "var(--s-eq)", "#14b8a6", "#ec4899", "#f59e0b"];
+const PALETTE = ["var(--series-3)", "var(--s-eq)", "var(--series-4)", "var(--series-5)", "var(--series-6)"];
 
 /** The right rail of the trade view: what the account holds, and a one-glance engine status. Everything about
  *  the engine's internals (decisions, queue, trades, settings) lives on the strategy page. */

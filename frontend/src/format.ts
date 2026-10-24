@@ -83,9 +83,9 @@ export const toolLabels: Record<string, string> = {
 
 export function fgColor(v: number): string {
   if (v < 25) return "var(--down)";
-  if (v < 45) return "#F59E0B";
+  if (v < 45) return "var(--warn)";
   if (v <= 55) return "var(--muted)";
-  if (v <= 75) return "#22B07D";
+  if (v <= 75) return "var(--series-4)";
   return "var(--up)";
 }
 

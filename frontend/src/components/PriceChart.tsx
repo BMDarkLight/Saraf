@@ -29,12 +29,13 @@ export function PriceChart({ symbol, theme }: { symbol: string; theme: string })
     });
     const vol = c.addSeries(HistogramSeries, { priceScaleId: "", priceFormat: { type: "volume" } });
     vol.priceScale().applyOptions({ scaleMargins: { top: 0.82, bottom: 0 } });
+    const upVol = `rgba(${cssVar("--up-rgb")}, 0.35)`, downVol = `rgba(${cssVar("--down-rgb")}, 0.35)`;
     let live = true;
     const load = async () => {
       const data: any[] = await getJSON(`/api/candles/${symbol}?resolution=${res}&bars=200`).catch(() => []);
       if (!live) return;
       candles.setData(data.map((d) => ({ time: d.t as UTCTimestamp, open: d.o, high: d.h, low: d.l, close: d.c })));
-      vol.setData(data.map((d) => ({ time: d.t as UTCTimestamp, value: d.v, color: d.c >= d.o ? "rgba(3,152,116,.35)" : "rgba(246,85,85,.35)" })));
+      vol.setData(data.map((d) => ({ time: d.t as UTCTimestamp, value: d.v, color: d.c >= d.o ? upVol : downVol })));
     };
     load().then(() => c.timeScale().fitContent());
     const t = setInterval(load, 15_000);

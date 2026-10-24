@@ -8,9 +8,11 @@ import {
 import { getJSON, type Action } from "../api";
 import { compact, pct, price, tone } from "../format";
 
-const SERIES_COLORS = ["#007AFF", "#F59E0B", "#8B5CF6", "#039874", "#F65555", "#06B6D4"];
-const LEVEL_COLORS: Record<string, string> = {
-  support: "#039874", resistance: "#F65555", entry: "#007AFF", take_profit: "#22B07D", stop_loss: "#F65555", other: "#8B95A5",
+// theme tokens (styles.css): canvas charts need the resolved colour, so they read the variable when drawing
+const seriesVar = (i: number) => `var(--series-${(i % 6) + 1})`;
+const seriesColor = (i: number) => css(`--series-${(i % 6) + 1}`);
+const LEVEL_VARS: Record<string, string> = {
+  support: "--up", resistance: "--down", entry: "--info", take_profit: "--up", stop_loss: "--down", other: "--muted",
 };
 
 // cells like "+3.4%" or "83,250" must stay LTR inside the RTL layout
@@ -49,7 +51,7 @@ function Frame({ title, children, wide }: { title: React.ReactNode; children: Re
 function ComparisonChart({ ui }: { ui: any }) {
   const chart = useChart((c) => {
     ui.series.forEach((s: any, i: number) => {
-      const line = c.addSeries(LineSeries, { color: SERIES_COLORS[i % 6], lineWidth: 2, priceFormat: { type: "custom", formatter: (v: number) => `${v.toFixed(1)}%` } });
+      const line = c.addSeries(LineSeries, { color: seriesColor(i), lineWidth: 2, priceFormat: { type: "custom", formatter: (v: number) => `${v.toFixed(1)}%` } });
       line.setData(s.points.map(([t, v]: [number, number]) => ({ time: t as UTCTimestamp, value: v })));
     });
     c.timeScale().fitContent();
@@ -60,7 +62,7 @@ function ComparisonChart({ ui }: { ui: any }) {
         {ui.series.map((s: any, i: number) => {
           const last = s.points.at(-1)?.[1];
           return (
-            <span key={s.symbol}><i style={{ background: SERIES_COLORS[i % 6] }} /><b className="ltr">{s.symbol}</b> <span className={`num ${tone(last)}`}>{pct(last)}</span></span>
+            <span key={s.symbol}><i style={{ background: seriesVar(i) }} /><b className="ltr">{s.symbol}</b> <span className={`num ${tone(last)}`}>{pct(last)}</span></span>
           );
         })}
       </div>
@@ -78,7 +80,7 @@ function Heatmap({ ui, onAsk }: { ui: any; onAsk: (t: string) => void }) {
         {ui.tiles.map((t: any) => {
           const w = 0.6 + 2.4 * Math.sqrt(t.volume / maxVol);
           const a = Math.min(Math.abs(t.change) / 8, 1) * 0.85 + 0.15;
-          const bg = t.change >= 0 ? `rgba(3,152,116,${a})` : `rgba(246,85,85,${a})`;
+          const bg = t.change >= 0 ? `rgba(var(--up-rgb), ${a})` : `rgba(var(--down-rgb), ${a})`;
           return (
             <button key={t.symbol} className={`heat-tile ${a < 0.5 ? "pale" : ""}`} style={{ flexGrow: w, flexBasis: `${w * 52}px`, background: bg }}
               title={`${t.name} · ${price(t.last)}`} onClick={() => onAsk(`بازار ${t.symbol} رو تحلیل کن`)}>
@@ -105,7 +107,7 @@ function AnnotatedChart({ ui }: { ui: any }) {
       c.timeScale().fitContent();
     });
     ui.levels.forEach((lv: any) =>
-      s.createPriceLine({ price: lv.price, color: LEVEL_COLORS[lv.kind] ?? "#8B95A5", lineWidth: 1, lineStyle: lv.kind === "entry" ? LineStyle.Solid : LineStyle.Dashed, axisLabelVisible: true, title: lv.label }),
+      s.createPriceLine({ price: lv.price, color: css(LEVEL_VARS[lv.kind] ?? "--muted"), lineWidth: 1, lineStyle: lv.kind === "entry" ? LineStyle.Solid : LineStyle.Dashed, axisLabelVisible: true, title: lv.label }),
     );
     return () => { live = false; };
   }, [ui], 280);
