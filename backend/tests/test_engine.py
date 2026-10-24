@@ -296,7 +296,7 @@ async def test_equity_counts_coins_the_engine_did_not_buy(tmp_path):
     assert eq > 4_950_000          # only fees and half the spread are gone, not 80% of the account
 
 
-# ------------------------------------------------- USDT core + USDT-market satellite (docs/STRATEGY.md)
+# ------------------------------------------------- USDT core + USDT-market satellite (docs/hackathon/STRATEGY.md)
 def line(start, end, days=4):
     """1m USDT/TMN bars moving linearly from start to end (tight high/low)."""
     n = days * 1440

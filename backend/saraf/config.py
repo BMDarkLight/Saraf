@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     engine_entry_timeout_bars: int = 2                  # cancel an unfilled entry limit after this many bars
     # Cancel the entry limit once the ask moves this many ATRs above where it was at order time. Chosen
     # in-sample (14d to 2026-10-14): tighter was monotonically better - a limit that only fills after the
-    # bounce has failed is adverse selection. See STRATEGY.md section 5.
+    # bounce has failed is adverse selection. See docs/hackathon/ENGINE.fa.md section 5.
     engine_entry_chase_atr: float = 0.1
     engine_max_positions: int = 3
     engine_max_position_pct: float = 0.25               # of equity, per position
@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     engine_end_time: str = ""                           # ISO-8601 challenge end; flatten to TMN before it
     engine_no_entry_before_end_min: int = 240
     engine_flatten_before_end_min: int = 45
-    # Strategy (docs/STRATEGY.md): "USDT" = USDT core + dip satellite on X/USDT markets; "TMN" = TMN markets only
+    # Strategy (docs/hackathon/STRATEGY.md): "USDT" = USDT core + dip satellite on X/USDT markets; "TMN" = TMN markets only
     engine_quote: Literal["TMN", "USDT"] = "TMN"
     engine_core_enabled: bool = True                    # hold free TMN as USDT (only with ENGINE_QUOTE=USDT)
     engine_core_tmn_reserve: float = 30_000             # TMN left unconverted

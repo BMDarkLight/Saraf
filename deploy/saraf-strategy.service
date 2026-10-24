@@ -1,5 +1,5 @@
 [Unit]
-Description=Saraf strategy session: USDT core + USDT-market satellite, in shadow (docs/STRATEGY.md)
+Description=Saraf strategy session: USDT core + USDT-market satellite, in shadow (docs/hackathon/STRATEGY.md)
 After=network-online.target
 Wants=network-online.target
 
