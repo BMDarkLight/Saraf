@@ -208,6 +208,52 @@ async def test_wallex_error_with_list_error_code_keeps_the_real_reason():
         await c.place_order("USDTTMN", "BUY", "MARKET", "18.3")
 
 
+async def test_order_requests_are_not_repeated_when_the_reply_is_lost(monkeypatch):
+    """A POST that timed out or got a 502/504 may already have placed the order: sending it again could
+    buy twice. Reads still retry, and so does a POST that never connected or was refused with 429."""
+    import httpx
+    from wallex_agent.wallex import WallexClient, WallexError
+    from wallex_agent.wallex import client as client_mod
+
+    async def no_sleep(_):
+        pass
+
+    monkeypatch.setattr(client_mod.asyncio, "sleep", no_sleep)
+    ok = httpx.Response(200, json={"success": True, "result": {"clientOrderId": "c1", "status": "NEW"}})
+
+    def mocked(first):
+        calls = []
+
+        def handler(req):
+            calls.append(req.method)
+            if len(calls) > 1:
+                return ok
+            if isinstance(first, Exception):
+                raise first
+            return httpx.Response(first, json={"success": False, "message": "busy"})
+
+        c = WallexClient(api_key="k")
+        c._http = httpx.AsyncClient(base_url="https://x", transport=httpx.MockTransport(handler))
+        return c, calls
+
+    for first in (httpx.ReadTimeout("lost reply"), 502, 504):
+        c, calls = mocked(first)
+        with pytest.raises(WallexError):
+            await c.place_order("USDTTMN", "BUY", "MARKET", "1.8")
+        assert calls == ["POST"]
+        c, calls = mocked(first)
+        with pytest.raises(WallexError):
+            await c.cancel_order("c1")
+        assert calls == ["DELETE"]
+        c, calls = mocked(first)
+        assert (await c.get_order("c1"))["clientOrderId"] == "c1" and calls == ["GET", "GET"]
+
+    for first in (httpx.ConnectError("no route"), 429):
+        c, calls = mocked(first)
+        assert (await c.place_order("USDTTMN", "BUY", "MARKET", "1.8"))["clientOrderId"] == "c1"
+        assert calls == ["POST", "POST"]
+
+
 async def test_live_whole_balance_buy_goes_as_limit_at_best_ask(fake):
     """Wallex rejected a 4,975,067-of-5,000,000 MARKET buy (1006): it reserves above the ask. A LIMIT at
     the best ask reserves exactly qty x price and still fills at once."""

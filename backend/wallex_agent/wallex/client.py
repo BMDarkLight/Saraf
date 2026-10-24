@@ -93,18 +93,24 @@ class WallexClient:
             if self.sub_account:
                 headers["sub-account-client-id"] = self.sub_account
         params = {k: v for k, v in (params or {}).items() if v is not None}
+        # A POST/DELETE (place or cancel an order) may have reached the exchange even when the reply was lost
+        # (read timeout, 502/504): repeating it could place the order twice. Retry those only when the request
+        # surely never arrived (no connection) or was refused unprocessed (429).
+        idempotent = method.upper() == "GET"
 
         for attempt in range(retries + 1):
             try:
                 r = await self._http.request(method, path, params=params, json=json, headers=headers)
             except httpx.TransportError as e:
-                if attempt < retries:
+                unsent = isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout))
+                if attempt < retries and (idempotent or unsent):
                     await asyncio.sleep(0.5 * (attempt + 1))
                     continue
                 # httpx timeouts stringify as "": name the exception so the journal says what happened
-                raise WallexError(f"network error calling {path} after {retries + 1} tries: "
+                raise WallexError(f"network error calling {path} after {attempt + 1} tries: "
                                   f"{type(e).__name__}{f' ({e})' if str(e) else ''}") from e
-            if r.status_code in (429, 502, 503, 504) and attempt < retries:
+            retry_codes = (429, 502, 503, 504) if idempotent else (429,)
+            if r.status_code in retry_codes and attempt < retries:
                 await asyncio.sleep(0.7 * (attempt + 1))
                 continue
             break
