@@ -6,8 +6,8 @@ import json
 import httpx
 import pytest
 
-from wallex_agent import traders
-from wallex_agent.traders import Follower, Hyperliquid, describe_changes, pick_leaders, target_weights, wallex_base
+from saraf import traders
+from saraf.traders import Follower, Hyperliquid, describe_changes, pick_leaders, target_weights, wallex_base
 
 PRICES = {"BTCUSDT": {"bid": 99.9, "ask": 100.1}, "ETHUSDT": {"bid": 9.99, "ask": 10.01},
           "PEPEUSDT": {"bid": 0.00001, "ask": 0.0000101}}

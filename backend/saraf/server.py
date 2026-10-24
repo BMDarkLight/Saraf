@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI):
     await ctx.client.aclose()
 
 
-app = FastAPI(title="Wallex Agent", lifespan=lifespan)
+app = FastAPI(title="Saraf", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -243,7 +243,7 @@ async def sentiment_ep(quote: str = "USDT"):
         glob = await sentiment.global_fear_greed(30)
     except Exception as e:
         glob = {"error": str(e)}
-    return {"global": glob, "wallex_pulse": await guarded(sentiment.wallex_pulse(ctx.client, quote))}
+    return {"global": glob, "market_pulse": await guarded(sentiment.market_pulse(ctx.client, quote))}
 
 
 @app.get("/api/news")
@@ -272,7 +272,7 @@ ENGINE_EVENTS = {"sweep", "core", "core_decision", "regime", "decision", "risk_b
                  "circuit_breaker", "error", "start", "stop", "trader"}
 
 
-STRATEGY_RUN = "strategy"   # deploy/wallex-strategy.service: the USDT strategy in shadow beside the main engine
+STRATEGY_RUN = "strategy"   # deploy/saraf-strategy.service: the USDT strategy in shadow beside the main engine
 
 
 def engine_dir(mode: str | None = None) -> Path | None:
@@ -335,7 +335,7 @@ def engine_status(mode: str | None = None) -> dict | None:
 
 
 MODE_ARGS = {"live": "--mode live --confirm-live", "shadow": "--mode shadow"}
-ENGINE_SERVICE = "wallex-engine"
+ENGINE_SERVICE = "saraf-engine"
 
 
 class EngineModeIn(BaseModel):
@@ -377,7 +377,7 @@ async def _restart_engine() -> None:
         raise HTTPException(500, f"restart failed: {err.decode(errors='ignore')[:300]}")
 
 
-# The main engine's strategy profile: deploy/strategy.env copied here makes wallex-engine run the USDT-core strategy
+# The main engine's strategy profile: deploy/strategy.env copied here makes saraf-engine run the USDT-core strategy
 # (the unit loads it after .env and mode.env); no file = the defaults (TMN markets).
 STRATEGY_PROFILE_FILE = ROOT / "data" / "engine" / "profile.env"
 STRATEGY_ENV = ROOT / "deploy" / "strategy.env"
@@ -622,7 +622,7 @@ async def strategy():
 
 
 # ---------------------------------------------------------- tuning, personas, strategy chat
-TUNING_FILE = ROOT / "data" / "engine" / "tuning.env"   # loaded by wallex-engine.service after the profile
+TUNING_FILE = ROOT / "data" / "engine" / "tuning.env"   # loaded by saraf-engine.service after the profile
 COPY_FILE = ROOT / "data" / "engine" / "copy.json"      # which persona the main engine copies: {"id", "at", "modified"}
 
 
@@ -702,7 +702,7 @@ async def set_tuning(body: TuningIn):
 def _write_tuning(values: dict) -> None:
     TUNING_FILE.parent.mkdir(parents=True, exist_ok=True)
     if values:
-        TUNING_FILE.write_text("# saved from the UI (strategy tuning / copy-trading); wallex_agent/tuning.py\n"
+        TUNING_FILE.write_text("# saved from the UI (strategy tuning / copy-trading); saraf/tuning.py\n"
                                + tuning.to_env(values))
     else:
         TUNING_FILE.unlink(missing_ok=True)
@@ -1155,7 +1155,7 @@ if DIST.exists():
 
 def main():
     import uvicorn
-    uvicorn.run("wallex_agent.server:app", host="127.0.0.1", port=8000, reload=False)
+    uvicorn.run("saraf.server:app", host="127.0.0.1", port=8000, reload=False)
 
 
 if __name__ == "__main__":

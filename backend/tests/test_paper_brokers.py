@@ -2,8 +2,8 @@
 
 import pytest
 
-from wallex_agent.brokers import BrokerError
-from wallex_agent.brokers.futures import TAKER_FEE, liquidation_price
+from saraf.brokers import BrokerError
+from saraf.brokers.futures import TAKER_FEE, liquidation_price
 
 
 # ===================================================================== spot
@@ -197,7 +197,7 @@ async def test_state_survives_restart(tmp_path, fake):
 
 async def test_wallex_error_with_list_error_code_keeps_the_real_reason():
     import httpx
-    from wallex_agent.wallex import WallexClient, WallexError
+    from saraf.wallex import WallexClient, WallexError
 
     def handler(req):
         return httpx.Response(422, json={"success": False, "message": "خطا", "result": {"error_code": [1006]}})
@@ -212,8 +212,8 @@ async def test_order_requests_are_not_repeated_when_the_reply_is_lost(monkeypatc
     """A POST that timed out or got a 502/504 may already have placed the order: sending it again could
     buy twice. Reads still retry, and so does a POST that never connected or was refused with 429."""
     import httpx
-    from wallex_agent.wallex import WallexClient, WallexError
-    from wallex_agent.wallex import client as client_mod
+    from saraf.wallex import WallexClient, WallexError
+    from saraf.wallex import client as client_mod
 
     async def no_sleep(_):
         pass
@@ -257,7 +257,7 @@ async def test_order_requests_are_not_repeated_when_the_reply_is_lost(monkeypatc
 async def test_live_whole_balance_buy_goes_as_limit_at_best_ask(fake):
     """Wallex rejected a 4,975,067-of-5,000,000 MARKET buy (1006): it reserves above the ask. A LIMIT at
     the best ask reserves exactly qty x price and still fills at once."""
-    from wallex_agent.brokers import LiveSpotBroker
+    from saraf.brokers import LiveSpotBroker
     sent = {}
 
     async def place_order(symbol, side, type, quantity, price=None, client_id=None):
@@ -275,7 +275,7 @@ async def test_detects_a_main_account_key():
     """A credit-account key sees its 5M without the sub-account header; a main-account key sees 0
     there (both can list /sub-accounts, so that is not a test)."""
     import httpx
-    from wallex_agent.wallex import WallexClient
+    from saraf.wallex import WallexClient
 
     def own_balance(tmn):
         def handler(req):
@@ -293,7 +293,7 @@ async def test_live_order_requests_match_wallex_docs():
     status, cancel (client id in the PATH, per the docs) - all with the credit sub-account header."""
     import json as _json
     import httpx
-    from wallex_agent.wallex import WallexClient
+    from saraf.wallex import WallexClient
 
     calls = []
 
@@ -320,8 +320,8 @@ async def test_live_order_requests_match_wallex_docs():
 async def test_live_market_sell_refused_goes_as_limit_through_the_book(fake):
     """Seen live 2026-10-23 on USOONUSDT: «امکان ثبت سفارش قیمت بازار در USOONUSDT بازار وجود ندارد». The same sell
     goes as a LIMIT at the worst bid level it needs, so it still fills at once."""
-    from wallex_agent.brokers import LiveSpotBroker
-    from wallex_agent.wallex import WallexError
+    from saraf.brokers import LiveSpotBroker
+    from saraf.wallex import WallexError
     sent = []
 
     async def place_order(symbol, side, type, quantity, price=None, client_id=None):
@@ -338,8 +338,8 @@ async def test_live_market_sell_refused_goes_as_limit_through_the_book(fake):
 
 
 async def test_live_other_rejections_are_not_retried_as_limit(fake):
-    from wallex_agent.brokers import BrokerError, LiveSpotBroker
-    from wallex_agent.wallex import WallexError
+    from saraf.brokers import BrokerError, LiveSpotBroker
+    from saraf.wallex import WallexError
     calls = []
 
     async def place_order(symbol, side, type, quantity, price=None, client_id=None):
@@ -354,7 +354,7 @@ async def test_live_other_rejections_are_not_retried_as_limit(fake):
 
 async def test_an_order_left_open_after_settling_is_cancelled():
     """A sell placed as a limit through the book on a moving book can rest; it must not stay on the book."""
-    from wallex_agent.engine.execution import SpotExec
+    from saraf.engine.execution import SpotExec
 
     class Spot:
         def __init__(self):
@@ -374,7 +374,7 @@ async def test_an_order_left_open_after_settling_is_cancelled():
         async def cancel_order(self, oid):
             self.canceled.append(oid)
 
-    import wallex_agent.engine.execution as ex
+    import saraf.engine.execution as ex
     spot = Spot()
     orig = ex.asyncio.sleep
     async def no_sleep(_):

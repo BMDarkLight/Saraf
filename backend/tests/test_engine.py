@@ -9,15 +9,15 @@ import pytest
 
 from conftest import FakeClient, make_settings
 from test_agent_loop import FakeLLM, chunk
-from wallex_agent.brokers import BrokerError, PaperSpotBroker
-from wallex_agent.engine import strategy
-from wallex_agent.engine.core import Engine
-from wallex_agent.engine.decider import AIDecider, Decision, ResponseCache, RuleDecider
-from wallex_agent.engine.execution import SimExec, SpotExec
-from wallex_agent.engine.features import Bar, closed, compute, resample
-from wallex_agent.engine.feeds import LiveFeed, SimFeed
-from wallex_agent.engine.journal import Journal
-from wallex_agent.engine.metrics import compute_metrics
+from saraf.brokers import BrokerError, PaperSpotBroker
+from saraf.engine import strategy
+from saraf.engine.core import Engine
+from saraf.engine.decider import AIDecider, Decision, ResponseCache, RuleDecider
+from saraf.engine.execution import SimExec, SpotExec
+from saraf.engine.features import Bar, closed, compute, resample
+from saraf.engine.feeds import LiveFeed, SimFeed
+from saraf.engine.journal import Journal
+from saraf.engine.metrics import compute_metrics
 
 T0 = 1_790_000_000 - 1_790_000_000 % 86_400
 
@@ -265,7 +265,7 @@ async def test_universe_skips_credit_blocked_markets(tmp_path):
 
 async def test_client_sends_sub_account_header_on_auth_calls():
     import httpx
-    from wallex_agent.wallex import WallexClient
+    from saraf.wallex import WallexClient
 
     seen = []
 
@@ -380,7 +380,7 @@ async def test_core_exit_slices_follow_ai_then_the_schedule(tmp_path):
 # ------------------------------------------------- audit fixes (2026-10-23): the satellite could never trade
 def test_size_takes_the_exchange_minimum_when_the_risk_budget_allows_it(tmp_path):
     """5M TMN is ~26 USDT; 1.2 x the 5 USDT minimum (~1.14M TMN) is above a 12.5% cap, so every entry was blocked."""
-    from wallex_agent.engine.risk import RiskManager
+    from saraf.engine.risk import RiskManager
     s = make_settings(tmp_path, engine_max_position_pct=0.125, engine_max_exposure_pct=0.5, engine_fee_rate=0.0013)
     rm = RiskManager(s, min_notional=5 * 190_000)
     kw = dict(equity=5_000_000, cash=5_000_000, exposure=0, price=100, size_fraction=1.0, regime="neutral")
@@ -424,7 +424,7 @@ async def test_breadth_is_measured_on_the_satellites_own_quote(tmp_path):
                     "BTCUSDT": {"quoteAsset": "USDT", "stats": down}, "ETHUSDT": {"quoteAsset": "USDT", "stats": down},
                     "USDCUSDT": {"quoteAsset": "USDT", "stats": up}}
 
-    import wallex_agent.engine.feeds as feeds
+    import saraf.engine.feeds as feeds
 
     async def no_fng(n):
         raise RuntimeError("offline")
@@ -475,7 +475,7 @@ async def test_coins_bought_outside_the_engine_do_not_fill_the_satellite_cap(tmp
 async def test_network_errors_name_the_exception():
     """Live 2026-10-22 17:52-18:00 UTC: 'network error calling /v1/account/balances: ' - a timeout with no text."""
     import httpx
-    from wallex_agent.wallex import WallexClient, WallexError
+    from saraf.wallex import WallexClient, WallexError
 
     def handler(req):
         raise httpx.ReadTimeout("")
@@ -677,7 +677,7 @@ async def test_live_copy_buys_nothing_while_switched_off(tmp_path):
 async def test_two_setups_on_the_same_coin_make_one_entry(tmp_path, monkeypatch):
     """Live 2026-10-23 19:00: dip_in_uptrend and oversold_reversion both fired on PENGUUSDT and each got its own order
     (~20% of equity on one coin). Only the stronger setup may enter."""
-    from wallex_agent.engine.strategy import Candidate
+    from saraf.engine.strategy import Candidate
     engine, broker, feed = usdt_engine(tmp_path, line(273_000, 274_000), CoreDecider(action="TAKE"))
     feed.t = T0 + 3 * 86_400                                 # enough hourly history for the features
     await engine.monitor()                                   # the core buys USDT first

@@ -7,8 +7,8 @@ import asyncio
 import json
 from datetime import datetime
 
-from wallex_agent.config import ROOT, get_settings
-from wallex_agent.engine.backtest import run_backtest
+from saraf.config import ROOT, get_settings
+from saraf.engine.backtest import run_backtest
 
 CONFIGS = [("taker", -1.0), ("maker", -1.0), ("maker", 0.0015), ("maker", 0.001)]
 

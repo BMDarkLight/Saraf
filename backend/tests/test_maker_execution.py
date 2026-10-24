@@ -6,12 +6,12 @@ import pytest
 
 from conftest import FakeClient, make_settings
 from test_engine import T0, ScriptedDecider, run, sim_feed
-from wallex_agent.brokers import PaperSpotBroker
-from wallex_agent.engine.core import Engine
-from wallex_agent.engine.execution import SimExec, SpotExec
-from wallex_agent.engine.features import Bar
-from wallex_agent.engine.feeds import SimFeed
-from wallex_agent.engine.journal import Journal
+from saraf.brokers import PaperSpotBroker
+from saraf.engine.core import Engine
+from saraf.engine.execution import SimExec, SpotExec
+from saraf.engine.features import Bar
+from saraf.engine.feeds import SimFeed
+from saraf.engine.journal import Journal
 
 
 def path_feed(prices: list[tuple[float, float, float]], start=T0):
@@ -89,8 +89,8 @@ async def test_unfilled_entry_is_cancelled_and_cash_restored(tmp_path):
     feed = sim_feed()
     engine, broker = make(tmp_path, feed, engine_entry_timeout_bars=1)
     feed.t = T0 + 3 * 86_400   # enough history for the 1h indicators
-    from wallex_agent.engine.strategy import Candidate
-    from wallex_agent.engine.features import compute
+    from saraf.engine.strategy import Candidate
+    from saraf.engine.features import compute
     bars, htf = await feed.bars("AAATMN")
     f = compute(bars, htf)
     # a limit far below the market can never fill
@@ -169,8 +169,8 @@ async def test_spread_alone_does_not_cancel_the_entry(tmp_path):
     feed = sim_feed()
     engine, broker = make(tmp_path, feed, engine_entry_chase_atr=0.5, engine_entry_timeout_bars=4)
     feed.t = T0 + 3 * 86_400
-    from wallex_agent.engine.strategy import Candidate
-    from wallex_agent.engine.features import compute
+    from saraf.engine.strategy import Candidate
+    from saraf.engine.features import compute
     bars, htf = await feed.bars("AAATMN")
     f = compute(bars, htf)
     feed.spreads["AAATMN"] = 3 * f["atr"] / f["close"]          # spread = 3 ATR, far wider than the chase limit

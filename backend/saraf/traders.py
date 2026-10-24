@@ -11,7 +11,7 @@ the weights are capped at 100% of our capital), and a simulated portfolio is mov
 Wallex prices with the account's real fees. Shorts cannot be copied on Wallex spot: those coins stay in USDT. Every
 change in the trader's positions is logged with what the copy did about it.
 
-  uv run python -m wallex_agent.traders run        # the wallex-traders service: all followers in one process
+  uv run python -m saraf.traders run        # the saraf-traders service: all followers in one process
 """
 
 from __future__ import annotations
@@ -418,4 +418,4 @@ if __name__ == "__main__":
     if sys.argv[1:] == ["run"]:
         asyncio.run(run(Settings()))
     else:
-        print("usage: python -m wallex_agent.traders run")
+        print("usage: python -m saraf.traders run")

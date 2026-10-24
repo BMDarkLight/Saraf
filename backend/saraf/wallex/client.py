@@ -62,7 +62,7 @@ class WallexClient:
         self._http = httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout,
-            headers={"User-Agent": "wallex-agent/0.1", "Accept": "application/json"},
+            headers={"User-Agent": "saraf/0.1", "Accept": "application/json"},
         )
         self._cache = _TTLCache()
 

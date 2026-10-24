@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Deploys a checked-out commit to /opt/wallex-agent and restarts the services.
+# Deploys a checked-out commit to /opt/saraf and restarts the services.
 # Run by the self-hosted runner on the VPS (.github/workflows/deploy.yml); usage: deploy.sh <checkout> <commit>
 # Server-only state is never touched: .env (keys, mode), data/ (engine journal + state, paper wallets).
 set -euo pipefail
 
 SRC=${1:?checkout directory}
 COMMIT=${2:-unknown}
-APP=/opt/wallex-agent
+APP=/opt/saraf
 UV=${UV:-/root/.local/bin/uv}
 
 # Build the UI in the checkout first: a failed build leaves the running deployment untouched
@@ -32,28 +32,28 @@ if [ -f "$APP/data/engine/profile.env" ]; then
   cp "$APP/deploy/strategy.env" "$APP/data/engine/profile.env"
 fi
 
-install -m 644 "$APP"/deploy/wallex-engine.service "$APP"/deploy/wallex-web.service \
-  "$APP"/deploy/wallex-strategy.service "$APP"/deploy/wallex-persona@.service \
-  "$APP"/deploy/wallex-traders.service /etc/systemd/system/
+install -m 644 "$APP"/deploy/saraf-engine.service "$APP"/deploy/saraf-web.service \
+  "$APP"/deploy/saraf-strategy.service "$APP"/deploy/saraf-persona@.service \
+  "$APP"/deploy/saraf-traders.service /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --quiet wallex-engine wallex-web wallex-strategy wallex-traders
-systemctl restart wallex-web wallex-engine wallex-strategy wallex-traders
+systemctl enable --quiet saraf-engine saraf-web saraf-strategy saraf-traders
+systemctl restart saraf-web saraf-engine saraf-strategy saraf-traders
 
-# copy-trading personas: one shadow session each (wallex_agent/personas.py lists them)
-PERSONAS=$(cd "$APP/backend" && "$UV" run --no-dev python -m wallex_agent.personas)
+# copy-trading personas: one shadow session each (saraf/personas.py lists them)
+PERSONAS=$(cd "$APP/backend" && "$UV" run --no-dev python -m saraf.personas)
 for id in $PERSONAS; do
-  systemctl enable --quiet "wallex-persona@$id"
-  systemctl restart "wallex-persona@$id"
+  systemctl enable --quiet "saraf-persona@$id"
+  systemctl restart "saraf-persona@$id"
 done
 
 for _ in $(seq 1 30); do
-  if curl -fsS -o /dev/null http://127.0.0.1:8000/api/config && systemctl is-active --quiet wallex-engine; then
+  if curl -fsS -o /dev/null http://127.0.0.1:8000/api/config && systemctl is-active --quiet saraf-engine; then
     MODE=$(cat "$APP/data/engine/mode.env" 2>/dev/null || grep '^ENGINE_RUN_ARGS=' "$APP/.env")
-    echo "deployed $COMMIT: web up, engine $(systemctl is-active wallex-engine) ($MODE), strategy session $(systemctl is-active wallex-strategy)"
+    echo "deployed $COMMIT: web up, engine $(systemctl is-active saraf-engine) ($MODE), strategy session $(systemctl is-active saraf-strategy)"
     exit 0
   fi
   sleep 2
 done
 echo "deploy $COMMIT failed health check" >&2
-journalctl -u wallex-web -u wallex-engine --no-pager -n 40 >&2
+journalctl -u saraf-web -u saraf-engine --no-pager -n 40 >&2
 exit 1

@@ -3,10 +3,10 @@ prices tests can move, so fills, TP/SL and liquidations are exactly reproducible
 
 import pytest
 
-from wallex_agent.agent.context import AppContext
-from wallex_agent.alerts import AlertStore
-from wallex_agent.brokers import PaperFuturesBroker, PaperSpotBroker
-from wallex_agent.config import Settings
+from saraf.agent.context import AppContext
+from saraf.alerts import AlertStore
+from saraf.brokers import PaperFuturesBroker, PaperSpotBroker
+from saraf.config import Settings
 
 
 def make_settings(tmp_path, **over) -> Settings:

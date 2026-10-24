@@ -11,4 +11,4 @@ ENV PYTHONUNBUFFERED=1 TZ=UTC
 ARG GIT_COMMIT=unknown
 ENV GIT_COMMIT=${GIT_COMMIT}
 # /app/data (journal, state, caches) is a volume so restarts resume where they left off
-CMD ["uv", "run", "--no-dev", "python", "-m", "wallex_agent.engine", "run"]
+CMD ["uv", "run", "--no-dev", "python", "-m", "saraf.engine", "run"]

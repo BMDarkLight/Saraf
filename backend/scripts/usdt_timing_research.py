@@ -5,7 +5,7 @@ import statistics as st
 
 from edge_research import hourly
 from rotation_research import ema
-from wallex_agent.wallex import WallexClient
+from saraf.wallex import WallexClient
 
 FEE = 0.003
 

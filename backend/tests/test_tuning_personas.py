@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from conftest import make_settings
-from wallex_agent import personas, strategy_chat, tuning
+from saraf import personas, strategy_chat, tuning
 
 
 def test_tuning_validates_bounds_types_and_cross_rules():
@@ -42,7 +42,7 @@ def test_every_persona_preset_is_valid_and_has_a_profile():
         ids.add(p["id"])
     assert len(ids) == len(personas.PERSONAS)
     assert "strategist" not in personas.session_ids() and "guardian" in personas.session_ids()
-    from wallex_agent.engine.runner import valid_run_name
+    from saraf.engine.runner import valid_run_name
     # live, 2026-10-23: persona-dip_hunter was refused at startup (underscore) and its unit crash-looped
     assert all(valid_run_name(personas.run_name(p)) for p in personas.PERSONAS)
     assert not any(valid_run_name(n) for n in ("live", "shadow", "../x", "a/b", ""))
@@ -50,7 +50,7 @@ def test_every_persona_preset_is_valid_and_has_a_profile():
 
 @pytest.fixture
 def srv(tmp_path, monkeypatch):
-    from wallex_agent import server
+    from saraf import server
 
     calls = []
 
@@ -83,7 +83,7 @@ def test_tuning_endpoint_saves_restarts_and_guards_live(srv):
     assert c.post("/api/strategy/tuning", json={"values": {"engine_max_positions": 99}}).status_code == 400
     assert c.post("/api/strategy/tuning", json={"values": {"engine_max_positions": 1}}).json()["ok"]
     assert "ENGINE_MAX_POSITIONS=1" in (srv.eng / "tuning.env").read_text()
-    assert srv.calls[-1] == ("systemctl", "restart", "wallex-engine")
+    assert srv.calls[-1] == ("systemctl", "restart", "saraf-engine")
     c.post("/api/strategy/tuning", json={"values": {"engine_breadth_gate_pct": 20}})
     assert tuning.read_env(srv.eng / "tuning.env") == {"engine_max_positions": 1, "engine_breadth_gate_pct": 20.0}
     (srv.eng / "mode.env").write_text("ENGINE_RUN_ARGS=--mode live --confirm-live\n")   # real money: confirm first
@@ -218,7 +218,7 @@ def test_assistant_applies_changes_itself_saves_the_chat_and_can_undo(srv, monke
     sid = r["session_id"]
     assert seen["allow"] and r["message"]["applied"]["changes"]["engine_max_positions"] == 1
     assert tuning.read_env(srv.eng / "tuning.env") == {"engine_max_positions": 1, "engine_risk_per_trade_pct": 0.005}
-    assert srv.calls[-1] == ("systemctl", "restart", "wallex-engine")
+    assert srv.calls[-1] == ("systemctl", "restart", "saraf-engine")
     r2 = c.post("/api/strategy/chat", json={"message": "دروازه چطور؟", "session_id": sid, "allow_apply": False}).json()
     assert "applied" not in r2["message"] and seen["history"] == ["ریسک را نصف کن و یک پوزیشن", "انجام شد.", "دروازه چطور؟"]
     rows = c.get("/api/strategy/chats").json()
@@ -269,7 +269,7 @@ def test_undo_reverts_only_what_that_message_changed(srv, monkeypatch):
 
 
 def test_live_traders_are_listed_added_and_removed(srv, monkeypatch):
-    from wallex_agent import traders
+    from saraf import traders
     monkeypatch.setattr(srv.server.traders_mod, "DIR", srv.eng / "traders")
     c = srv.c
     assert c.post("/api/traders", json={"address": "nope"}).status_code == 400
@@ -292,7 +292,7 @@ def test_live_traders_are_listed_added_and_removed(srv, monkeypatch):
 
 
 def test_copying_a_live_trader_points_the_engine_at_them_and_stop_copy_clears_it(srv, monkeypatch):
-    from wallex_agent import traders
+    from saraf import traders
     monkeypatch.setattr(srv.server.traders_mod, "DIR", srv.eng / "traders")
     monkeypatch.setattr(srv.server, "STRATEGY_ENV", srv.tmp / "strategy.env")
     (srv.tmp / "strategy.env").write_text("ENGINE_QUOTE=USDT\n")
@@ -307,7 +307,7 @@ def test_copying_a_live_trader_points_the_engine_at_them_and_stop_copy_clears_it
     assert r["copying"]["kind"] == "trader" and r["copying"]["name"] == "Whale"
     over = tuning.read_env(srv.eng / "tuning.env")
     assert over == {"engine_end_time": "2099-01-01T00:00:00Z", "engine_follow_address": addr, "engine_follow_pct": 0.4}
-    assert srv.calls[-1] == ("systemctl", "restart", "wallex-engine")
+    assert srv.calls[-1] == ("systemctl", "restart", "saraf-engine")
     assert c.post(f"/api/traders/{addr}/copy", json={"pct": 3, "confirm": "LIVE"}).status_code == 400
     assert c.post("/api/personas/stop-copy", json={"confirm": "LIVE"}).json()["ok"]
     assert tuning.read_env(srv.eng / "tuning.env") == {"engine_end_time": "2099-01-01T00:00:00Z"}

@@ -64,7 +64,7 @@ class DemoAccountBroker:
 
 
 def write_journals(root: Path) -> None:
-    from wallex_agent.personas import PERSONAS, run_name
+    from saraf.personas import PERSONAS, run_name
     now = int(time.time())
     cfg = {"engine_quote": "USDT", "engine_decider": "ai", "engine_end_time": "2026-10-26T20:29:00Z",
            "engine_max_exposure_pct": 0.3, "engine_max_position_pct": 0.125, "engine_max_positions": 3,
@@ -120,8 +120,8 @@ def write_journals(root: Path) -> None:
     for i, p in enumerate(PERSONAS):
         run(run_name(p), [0.00003, 0.000035, -0.00001, -0.00002, 0.00002][i], 120 + 40 * i,
             [("XRPUSDT", 1.4, "take_profit"), ("DOGEUSDT", -0.9, "stop_loss")][: i % 3])
-    # live trader personas (wallex_agent/traders.py), shaped like the real Hyperliquid data seen 2026-10-23
-    from wallex_agent import traders
+    # live trader personas (saraf/traders.py), shaped like the real Hyperliquid data seen 2026-10-23
+    from saraf import traders
     whales = [("0x5b5d51203a0f9079f8aeb098a6523a13f298c060", None, 261.6e6, (4.09e6, 18.1e6, 109e6, 173.8e6),
                [("ETH", "short", 247e6), ("BTC", "short", 201e6), ("SOL", "short", 68e6), ("LINK", "short", 4.2e6)], 0.0),
               ("0x7fdafde5cfb5465924316eced2d3715494c517d1", "BobbyBigSize", 48.3e6, (-90e3, 2.9e6, 20.3e6, 140.1e6),
@@ -158,9 +158,9 @@ def write_journals(root: Path) -> None:
 def main() -> None:
     import uvicorn
 
-    from wallex_agent import server
-    from wallex_agent.agent import tools as agent_tools
-    from wallex_agent.market import sentiment
+    from saraf import server
+    from saraf.agent import tools as agent_tools
+    from saraf.market import sentiment
 
     write_journals(server.ROOT / "data" / "engine")
     client = DemoClient()
@@ -191,7 +191,7 @@ def main() -> None:
         ch = {"engine_breadth_gate_pct": 30.0}
         return {"reply": "پیشنهاد: دروازه فراگیری را ۳۰٪ کنید.", "proposal": {"changes": ch, "reasoning": "", "dropped": []},
                 "apply": False}
-    from wallex_agent import strategy_chat
+    from saraf import strategy_chat
     strategy_chat.ask = scripted_ask
 
     async def fng(days=30):

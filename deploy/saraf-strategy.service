@@ -1,0 +1,19 @@
+[Unit]
+Description=Saraf strategy session: USDT core + USDT-market satellite, in shadow (docs/STRATEGY.md)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/saraf/backend
+EnvironmentFile=/opt/saraf/.env
+EnvironmentFile=/opt/saraf/deploy/strategy.env
+# the challenge window (deploy/challenge.env, tracked in git) is loaded last so a push can move it
+EnvironmentFile=-/opt/saraf/deploy/challenge.env
+Environment=PYTHONUNBUFFERED=1 TZ=UTC
+# its own journal (data/engine/strategy), so it never shares state with the main engine in either mode
+ExecStart=/root/.local/bin/uv run --no-dev python -m saraf.engine run --mode shadow --name strategy
+Restart=always
+RestartSec=20
+
+[Install]
+WantedBy=multi-user.target

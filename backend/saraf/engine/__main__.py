@@ -1,9 +1,9 @@
 """CLI.
 
-  python -m wallex_agent.engine backtest --days 14 --decider both
-  python -m wallex_agent.engine run --mode shadow
-  python -m wallex_agent.engine run --mode live --confirm-live
-  python -m wallex_agent.engine report data/engine/live
+  python -m saraf.engine backtest --days 14 --decider both
+  python -m saraf.engine run --mode shadow
+  python -m saraf.engine run --mode live --confirm-live
+  python -m saraf.engine report data/engine/live
 """
 
 import argparse
@@ -17,7 +17,7 @@ from .metrics import compute_metrics, render_markdown
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(prog="wallex_agent.engine")
+    p = argparse.ArgumentParser(prog="saraf.engine")
     sub = p.add_subparsers(dest="cmd", required=True)
     b = sub.add_parser("backtest")
     b.add_argument("--days", type=float, default=14)
@@ -25,7 +25,7 @@ def main() -> None:
     b.add_argument("--decider", choices=["ai", "rules", "both"], default="both")
     b.add_argument("--symbols", help="comma-separated; default = current auto universe")
     b.add_argument("--offline", action="store_true", help="AI decisions from cache only (exact replay)")
-    b.add_argument("--persona", help="apply a copy-trading persona's preset (wallex_agent/personas.py)")
+    b.add_argument("--persona", help="apply a copy-trading persona's preset (saraf/personas.py)")
     r = sub.add_parser("run")
     r.add_argument("--mode", choices=["shadow", "live"], default=None)
     r.add_argument("--confirm-live", action="store_true")
@@ -55,7 +55,7 @@ def main() -> None:
         syms = [x.strip().upper() for x in a.symbols.split(",")] if a.symbols else None
         res = asyncio.run(run_backtest(s, a.days, end, kinds, syms, a.offline))
         first = next(iter(res.values()))
-        print("\nreproduce exactly (the auto universe changes with 24h volume):\n  python -m wallex_agent.engine "
+        print("\nreproduce exactly (the auto universe changes with 24h volume):\n  python -m saraf.engine "
               f"backtest --days {a.days:g} --end {first['window_end']} --symbols {','.join(first['symbols'])} "
               f"--decider {a.decider}")
         for kind, m in res.items():

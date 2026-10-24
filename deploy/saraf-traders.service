@@ -1,14 +1,14 @@
 [Unit]
-Description=Wallex live trader personas: follow real Hyperliquid traders, simulated copy (wallex_agent/traders.py)
+Description=Saraf live trader personas: follow real Hyperliquid traders, simulated copy (saraf/traders.py)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-WorkingDirectory=/opt/wallex-agent/backend
-EnvironmentFile=/opt/wallex-agent/.env
+WorkingDirectory=/opt/saraf/backend
+EnvironmentFile=/opt/saraf/.env
 Environment=PYTHONUNBUFFERED=1 TZ=UTC
 # shadow only: reads public positions, simulates the copy at live Wallex prices, never places orders
-ExecStart=/root/.local/bin/uv run --no-dev python -m wallex_agent.traders run
+ExecStart=/root/.local/bin/uv run --no-dev python -m saraf.traders run
 Restart=always
 RestartSec=30
 MemoryMax=400M

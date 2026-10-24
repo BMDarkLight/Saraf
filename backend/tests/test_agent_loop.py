@@ -8,8 +8,8 @@ from types import SimpleNamespace as NS
 
 import pytest
 
-from wallex_agent.agent.context import AppContext
-from wallex_agent.agent.loop import Agent
+from saraf.agent.context import AppContext
+from saraf.agent.loop import Agent
 from conftest import make_settings
 
 
@@ -107,8 +107,8 @@ async def test_risk_guard_blocks_oversized_order(agent):
 
 
 def test_tool_groups_join_when_mentioned_and_stay():
-    from wallex_agent.agent.tools import TOOLS
-    from wallex_agent.agent.toolsets import select_tools
+    from saraf.agent.tools import TOOLS
+    from saraf.agent.toolsets import select_tools
 
     names = list(TOOLS)
     core = select_tools(names, [{"role": "user", "content": "قیمت تتر"}])
@@ -125,5 +125,5 @@ def test_tool_groups_join_when_mentioned_and_stay():
 
 
 def test_engine_key_is_not_journaled():
-    from wallex_agent.engine.runner import SECRET_FIELDS
+    from saraf.engine.runner import SECRET_FIELDS
     assert {"llm_api_key", "engine_llm_api_key", "wallex_api_key"} <= SECRET_FIELDS

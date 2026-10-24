@@ -9,7 +9,7 @@ import pytest
 
 from conftest import make_ctx, make_settings
 from test_agent_loop import FakeLLM, chunk, collect, tc
-from wallex_agent.agent.loop import Agent, repair_history, trim_history
+from saraf.agent.loop import Agent, repair_history, trim_history
 
 
 @pytest.fixture
@@ -163,8 +163,8 @@ async def test_rejection(agent, ctx):
 # ---------------------------------------------------------------- server
 @pytest.fixture
 async def http(agent, monkeypatch):
-    from wallex_agent import server
-    from wallex_agent.market import sentiment
+    from saraf import server
+    from saraf.market import sentiment
 
     monkeypatch.setattr(server, "agent", agent)
     monkeypatch.setattr(server, "ctx", agent.ctx)
@@ -209,7 +209,7 @@ async def test_chat_and_action_endpoints(http, agent):
 
 
 def test_session_store_roundtrip(tmp_path):
-    from wallex_agent.agent.sessions import SessionStore
+    from saraf.agent.sessions import SessionStore
 
     st = SessionStore(tmp_path)
     sid = "ab12" * 8
@@ -226,7 +226,7 @@ def test_session_store_roundtrip(tmp_path):
 def test_engine_mode_switch_requires_live_confirmation(tmp_path, monkeypatch):
     import asyncio
     from fastapi.testclient import TestClient
-    from wallex_agent import server
+    from saraf import server
 
     calls = []
 
@@ -247,7 +247,7 @@ def test_engine_mode_switch_requires_live_confirmation(tmp_path, monkeypatch):
     assert not calls and not (tmp_path / "data/engine/mode.env").exists()
     assert c.post("/api/engine/mode", json={"mode": "live", "confirm": "LIVE"}).json()["mode"] == "live"
     assert (tmp_path / "data/engine/mode.env").read_text() == "ENGINE_RUN_ARGS=--mode live --confirm-live\n"
-    assert calls[-1] == ("systemctl", "restart", "wallex-engine")
+    assert calls[-1] == ("systemctl", "restart", "saraf-engine")
     assert server.ctx.spot.mode == "live" and server.settings.spot_mode == "live"
     assert c.post("/api/engine/mode", json={"mode": "shadow"}).status_code == 200
     assert "--mode shadow" in (tmp_path / "data/engine/mode.env").read_text()
@@ -256,7 +256,7 @@ def test_engine_mode_switch_requires_live_confirmation(tmp_path, monkeypatch):
 
 async def test_strategy_endpoint_shows_the_core_run_next_to_live(http, tmp_path, monkeypatch):
     """A live engine and a shadow strategy session run side by side: each view reads its own journal."""
-    from wallex_agent import server
+    from saraf import server
 
     now = int(time.time())
     monkeypatch.setattr(server, "ROOT", tmp_path)
@@ -283,7 +283,7 @@ async def test_strategy_endpoint_shows_the_core_run_next_to_live(http, tmp_path,
 def test_strategy_real_switch_needs_confirmation_and_sets_the_profile(tmp_path, monkeypatch):
     import asyncio
     from fastapi.testclient import TestClient
-    from wallex_agent import server
+    from saraf import server
 
     calls = []
 
@@ -306,7 +306,7 @@ def test_strategy_real_switch_needs_confirmation_and_sets_the_profile(tmp_path, 
     r = c.post("/api/strategy/live", json={"on": True, "confirm": "LIVE"}).json()
     assert r["strategy_live"] and "ENGINE_QUOTE=USDT" in profile.read_text()
     assert "--mode live" in (tmp_path / "data/engine/mode.env").read_text() and server.ctx.spot.mode == "live"
-    assert calls[-1] == ("systemctl", "restart", "wallex-engine")
+    assert calls[-1] == ("systemctl", "restart", "saraf-engine")
     r = c.post("/api/strategy/live", json={"on": False}).json()
     assert not r["strategy_live"] and not profile.exists()
     assert "--mode live" in (tmp_path / "data/engine/mode.env").read_text()   # the app's mode stays the header's call
@@ -316,7 +316,7 @@ def test_strategy_real_switch_needs_confirmation_and_sets_the_profile(tmp_path, 
 async def test_scheduled_strategy_switch_fires_once(tmp_path, monkeypatch):
     import asyncio
     from fastapi.testclient import TestClient
-    from wallex_agent import server
+    from saraf import server
 
     calls = []
 
@@ -344,7 +344,7 @@ async def test_scheduled_strategy_switch_fires_once(tmp_path, monkeypatch):
     assert not calls and sched.exists()                                                      # not due yet
     sched.write_text(json.dumps({"at": time.time() - 1}))
     await server._run_strategy_schedule()
-    assert server.strategy_is_live() and not sched.exists() and calls[-1] == ("systemctl", "restart", "wallex-engine")
+    assert server.strategy_is_live() and not sched.exists() and calls[-1] == ("systemctl", "restart", "saraf-engine")
     await server._run_strategy_schedule()
     assert len(calls) == 1                                                                   # one shot
     c.post("/api/strategy/live", json={"on": False})

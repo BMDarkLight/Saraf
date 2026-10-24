@@ -3,7 +3,7 @@ services:
     build: .
     env_file: .env
     # shadow by default; for the challenge set ENGINE_MODE=live in .env and use:
-    # command: ["uv", "run", "--no-dev", "python", "-m", "wallex_agent.engine", "run", "--mode", "live", "--confirm-live"]
+    # command: ["uv", "run", "--no-dev", "python", "-m", "saraf.engine", "run", "--mode", "live", "--confirm-live"]
     volumes:
       - ./data:/app/data
     restart: unless-stopped

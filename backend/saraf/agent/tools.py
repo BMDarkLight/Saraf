@@ -184,13 +184,13 @@ class FGArgs(BaseModel):
 
 
 @tool("fear_greed_index", "Fear & Greed: the global crypto index (alternative.me, 7-day history) plus "
-      "'Wallex Pulse', a local index computed from Wallex market breadth, momentum and buy pressure.", FGArgs)
+      "'Market Pulse', a local index computed from the venue's market breadth, momentum and buy pressure.", FGArgs)
 async def fear_greed_index(ctx: AppContext, a: FGArgs):
     try:
         glob = await sentiment.global_fear_greed()
     except Exception as e:
         glob = {"error": str(e)}
-    return {"global": glob, "wallex_pulse": await sentiment.wallex_pulse(ctx.client, a.quote)}
+    return {"global": glob, "market_pulse": await sentiment.market_pulse(ctx.client, a.quote)}
 
 
 @tool("market_risk", "Risk score (0-100) for a market from volatility, liquidity, spread and RSI extremes, "

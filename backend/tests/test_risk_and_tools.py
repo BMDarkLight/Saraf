@@ -5,7 +5,7 @@ import json
 import pytest
 
 from conftest import make_ctx, make_settings
-from wallex_agent.agent.loop import Agent
+from saraf.agent.loop import Agent
 
 
 @pytest.fixture
@@ -94,11 +94,11 @@ async def test_read_webpage_blocks_private_addresses(agent):
 
 async def test_slow_tool_times_out_instead_of_hanging(agent, monkeypatch):
     import asyncio
-    from wallex_agent.agent import tools as T
+    from saraf.agent import tools as T
 
     async def slow(ctx, a):
         await asyncio.sleep(30)
     monkeypatch.setattr(T.TOOLS["list_markets"], "handler", slow)
-    monkeypatch.setattr("wallex_agent.agent.loop.TOOL_TIMEOUT", 0.2)
+    monkeypatch.setattr("saraf.agent.loop.TOOL_TIMEOUT", 0.2)
     ok, res, _ = await run(agent, "list_markets")
     assert not ok and "timed out" in res["error"]

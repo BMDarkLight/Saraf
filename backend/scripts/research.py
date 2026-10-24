@@ -10,11 +10,11 @@ import asyncio
 import time
 from collections import defaultdict
 
-from wallex_agent.config import ROOT, get_settings
-from wallex_agent.engine.feeds import LiveFeed, load_history
-from wallex_agent.engine.features import closed, compute, resample
-from wallex_agent.engine.strategy import candidates
-from wallex_agent.wallex import WallexClient
+from saraf.config import ROOT, get_settings
+from saraf.engine.feeds import LiveFeed, load_history
+from saraf.engine.features import closed, compute, resample
+from saraf.engine.strategy import candidates
+from saraf.wallex import WallexClient
 
 GRID = [(1.0, 2.0), (1.5, 2.0), (1.5, 3.0), (2.0, 3.0), (2.0, 4.0), (2.5, 5.0)]
 

@@ -71,7 +71,7 @@ def run_name(p: dict) -> str:
 
 
 def session_ids() -> list[str]:
-    """Personas that need their own shadow session (wallex-persona@<id>.service)."""
+    """Personas that need their own shadow session (saraf-persona@<id>.service)."""
     return [p["id"] for p in PERSONAS if not p.get("run")]
 
 

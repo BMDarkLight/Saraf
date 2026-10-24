@@ -1,17 +1,17 @@
 [Unit]
-Description=Wallex copy-trading persona %i, in shadow (wallex_agent/personas.py)
+Description=Saraf copy-trading persona %i, in shadow (saraf/personas.py)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-WorkingDirectory=/opt/wallex-agent/backend
-EnvironmentFile=/opt/wallex-agent/.env
-EnvironmentFile=/opt/wallex-agent/deploy/strategy.env
-EnvironmentFile=-/opt/wallex-agent/deploy/challenge.env
+WorkingDirectory=/opt/saraf/backend
+EnvironmentFile=/opt/saraf/.env
+EnvironmentFile=/opt/saraf/deploy/strategy.env
+EnvironmentFile=-/opt/saraf/deploy/challenge.env
 # a slower monitor than the real engine: several personas share the VPS and Wallex's rate limits
 Environment=PYTHONUNBUFFERED=1 TZ=UTC ENGINE_MONITOR_SECONDS=30
 # its own journal (data/engine/persona-%i); shadow only, never real orders (the CLI refuses live with --persona)
-ExecStart=/root/.local/bin/uv run --no-dev python -m wallex_agent.engine run --mode shadow --persona %i
+ExecStart=/root/.local/bin/uv run --no-dev python -m saraf.engine run --mode shadow --persona %i
 Restart=always
 RestartSec=30
 

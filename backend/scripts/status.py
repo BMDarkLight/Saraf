@@ -1,6 +1,6 @@
 """Read-only status report of the deployed engine, for the Status workflow (.github/workflows/status.yml).
 
-Run on the VPS from /opt/wallex-agent/backend:  uv run --no-dev python <path>/status.py [--events 60]
+Run on the VPS from /opt/saraf/backend:  uv run --no-dev python <path>/status.py [--events 60]
 Prints: which runs exist and how they are configured, state (positions, orders, core, regime), equity and return,
 event counts since the last start, the newest events and trades, and the market facts sizing depends on (USDT/TMN,
 USDT-market minimum order, the account's fees and balances). No secrets are printed and nothing is changed.
@@ -17,10 +17,10 @@ import time
 from collections import Counter
 from pathlib import Path
 
-from wallex_agent.brokers import LiveSpotBroker
-from wallex_agent.brokers.base import safe_float
-from wallex_agent.config import ROOT, get_settings
-from wallex_agent.wallex import WallexClient
+from saraf.brokers import LiveSpotBroker
+from saraf.brokers.base import safe_float
+from saraf.config import ROOT, get_settings
+from saraf.wallex import WallexClient
 
 SHOW = ("engine_quote", "engine_decider", "engine_end_time", "engine_fee_rate", "engine_maker_fee_rate",
         "engine_max_exposure_pct", "engine_max_position_pct", "engine_max_positions", "engine_risk_per_trade_pct",
@@ -152,9 +152,9 @@ async def market_facts() -> None:
 async def signal_scan() -> None:
     """Why the satellite does (not) buy: for each market it watches, the live 15m/1h features next to the setups'
     entry conditions (strategy.py), with the strategy profile's settings."""
-    from wallex_agent.engine import strategy
-    from wallex_agent.engine.features import compute
-    from wallex_agent.engine.feeds import LiveFeed
+    from saraf.engine import strategy
+    from saraf.engine.features import compute
+    from saraf.engine.feeds import LiveFeed
     s = get_settings()
     prof = {}
     for line in (ROOT / "deploy" / "strategy.env").read_text().splitlines():
@@ -194,7 +194,7 @@ async def signal_scan() -> None:
 
 
 def report_trader(d: Path) -> None:
-    """A followed real trader (wallex_agent/traders.py): their book and the simulated copy."""
+    """A followed real trader (saraf/traders.py): their book and the simulated copy."""
     print(f"\n================ trader: {d.name} ================")
     prof = json.loads((d / "trader.json").read_text()) if (d / "trader.json").exists() else {}
     state = json.loads((d / "state.json").read_text()) if (d / "state.json").exists() else {}

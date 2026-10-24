@@ -3,9 +3,9 @@ import asyncio, json, os, sys, tempfile
 from pathlib import Path
 
 os.environ.setdefault("DATA_DIR", tempfile.mkdtemp())
-from wallex_agent.config import get_settings
-from wallex_agent.agent.context import AppContext
-from wallex_agent.agent.loop import Agent
+from saraf.config import get_settings
+from saraf.agent.context import AppContext
+from saraf.agent.loop import Agent
 
 
 async def call(agent, session, name, **args):

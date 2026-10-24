@@ -1,7 +1,7 @@
 """Fear & Greed / risk indices.
 
 - Global crypto Fear & Greed from alternative.me.
-- "Wallex Pulse": a local fear/greed index computed from Wallex's own market breadth.
+- "Market Pulse": a local fear/greed index computed from a venue's own market breadth.
 - Per-market risk score from volatility, liquidity and spread.
 """
 
@@ -46,8 +46,8 @@ async def global_fear_greed(days: int = 7) -> dict:
     return out
 
 
-async def wallex_pulse(client: WallexClient, quote: str = "USDT") -> dict:
-    """0-100 fear/greed index from Wallex's own markets (top 50 by volume)."""
+async def market_pulse(client: WallexClient, quote: str = "USDT") -> dict:
+    """0-100 fear/greed index from the venue's own markets (top 50 by volume)."""
     rows = await market_overview(client, quote=quote, sort_by="volume", limit=50)
     rows = [r for r in rows if r["last"]]
     if not rows:
@@ -62,7 +62,7 @@ async def wallex_pulse(client: WallexClient, quote: str = "USDT") -> dict:
     trend = min(max((wk + 20) / 40, 0), 1)
     score = round(100 * (0.35 * breadth + 0.30 * momentum + 0.20 * buy_pressure + 0.15 * trend))
     return {
-        "source": f"Wallex Pulse ({quote} markets, computed locally)", "value": score,
+        "source": f"Market Pulse ({quote} markets, computed locally)", "value": score,
         "classification": classify(score),
         "components": {
             "breadth_pct_markets_up_24h": round(100 * breadth, 1),

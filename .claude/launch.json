@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "wallex-agent",
+      "name": "saraf",
       "runtimeExecutable": "uv",
       "runtimeArgs": [
         "run",
@@ -10,7 +10,7 @@
         "backend",
         "python",
         "-m",
-        "wallex_agent.server"
+        "saraf.server"
       ],
       "port": 8000
     },

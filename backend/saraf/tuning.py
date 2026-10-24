@@ -1,6 +1,6 @@
 """Strategy tuning from the UI: a bounded set of engine settings, saved as data/engine/tuning.env.
 
-wallex-engine.service loads that file after the strategy profile and before the challenge window, so a saved
+saraf-engine.service loads that file after the strategy profile and before the challenge window, so a saved
 setting replaces the profile's value on the next engine restart. Only the parameters below can be set, each
 within bounds that keep the risk rules meaningful; the quote currency, the capital and the challenge end are not
 tunable here. Personas (personas.py) are named sets of these same parameters.

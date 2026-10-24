@@ -11,7 +11,7 @@ import asyncio
 import statistics as st
 
 from edge_research import hourly
-from wallex_agent.wallex import WallexClient
+from saraf.wallex import WallexClient
 
 USDT_FEE = 0.0013     # taker on USDT markets for the credit account
 SPLIT_DAYS = 60

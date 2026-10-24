@@ -1,22 +1,22 @@
 [Unit]
-Description=Wallex autonomous trading engine
+Description=Saraf autonomous trading engine
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-WorkingDirectory=/opt/wallex-agent/backend
-EnvironmentFile=/opt/wallex-agent/.env
+WorkingDirectory=/opt/saraf/backend
+EnvironmentFile=/opt/saraf/.env
 # the UI's live/shadow toggle writes this (data/ survives deploys); it overrides ENGINE_RUN_ARGS in .env
-EnvironmentFile=-/opt/wallex-agent/data/engine/mode.env
+EnvironmentFile=-/opt/saraf/data/engine/mode.env
 # the strategy card's real-mode switch copies deploy/strategy.env here (absent = default TMN-market settings)
-EnvironmentFile=-/opt/wallex-agent/data/engine/profile.env
+EnvironmentFile=-/opt/saraf/data/engine/profile.env
 # the challenge window (deploy/challenge.env, tracked in git): a push can move it...
-EnvironmentFile=-/opt/wallex-agent/deploy/challenge.env
+EnvironmentFile=-/opt/saraf/deploy/challenge.env
 # ...and settings saved in the UI (strategy tuning, persona copy, the strategy assistant) override it: tuning.py
-EnvironmentFile=-/opt/wallex-agent/data/engine/tuning.env
+EnvironmentFile=-/opt/saraf/data/engine/tuning.env
 Environment=PYTHONUNBUFFERED=1 TZ=UTC
 # ENGINE_RUN_ARGS lives in the server's .env: "--mode shadow", or "--mode live --confirm-live" for the challenge
-ExecStart=/root/.local/bin/uv run --no-dev python -m wallex_agent.engine run $ENGINE_RUN_ARGS
+ExecStart=/root/.local/bin/uv run --no-dev python -m saraf.engine run $ENGINE_RUN_ARGS
 Restart=always
 RestartSec=20
 

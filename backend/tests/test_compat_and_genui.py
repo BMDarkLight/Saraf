@@ -6,9 +6,9 @@ import os
 
 import pytest
 
-from wallex_agent.agent.context import AppContext
-from wallex_agent.agent.loop import Agent, compat_history, for_model, parse_text_tool_calls
-from wallex_agent.agent.tools import TOOLS, openai_tools
+from saraf.agent.context import AppContext
+from saraf.agent.loop import Agent, compat_history, for_model, parse_text_tool_calls
+from saraf.agent.tools import TOOLS, openai_tools
 from conftest import make_settings
 
 
@@ -88,7 +88,7 @@ async def test_genui_tools_render_and_hide_payload_from_model(agent):
 
 
 async def test_ticket_submission_goes_through_risk_and_confirmation(agent):
-    from wallex_agent import server
+    from saraf import server
     server.agent, server.ctx = agent, agent.ctx
     out = await server.submit_ticket(server.TicketIn(market="spot", symbol="BTCUSDT", side="BUY", amount=20))
     assert out["ok"] and out["action"]["status"] == "pending"

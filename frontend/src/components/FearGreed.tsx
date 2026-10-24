@@ -36,12 +36,12 @@ export function FearGreed() {
     return () => clearInterval(t);
   }, []);
   const g = data?.global;
-  const p = data?.wallex_pulse;
+  const p = data?.market_pulse;
   return (
     <div className="card">
       <div className="card-h">شاخص ترس و طمع</div>
       <div className="card-b fg-pair">
-        {[["جهانی", g], ["پالس والکس", p]].map(([label, d]: any) => (
+        {[["جهانی", g], ["پالس بازار", p]].map(([label, d]: any) => (
           <div className="fg-mini" key={label}>
             <div className="fg-title">{label}</div>
             {d?.value != null ? (

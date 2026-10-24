@@ -28,7 +28,7 @@ export function ToolWidget({ name, result }: { name: string; result: any }) {
     );
   }
   if (name === "fear_greed_index") {
-    const items = [["جهانی", result.global], ["پالس والکس", result.wallex_pulse]] as const;
+    const items = [["جهانی", result.global], ["پالس بازار", result.market_pulse]] as const;
     return (
       <div className="widget">
         <div className="widget-h">شاخص ترس و طمع</div>
