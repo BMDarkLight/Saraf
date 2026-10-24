@@ -3,6 +3,6 @@
 from .base import Capabilities, Venue, VenueError, VenueUnsupported
 from .registry import Venues, available, create, register
 
-from . import wallex  # noqa: E402,F401  (registers the venues)
+from . import tse, wallex  # noqa: E402,F401  (registers the venues)
 
 __all__ = ["Capabilities", "Venue", "VenueError", "VenueUnsupported", "Venues", "available", "create", "register"]
