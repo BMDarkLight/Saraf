@@ -27,6 +27,22 @@
       "port": 8000
     },
     {
+      "name": "saraf-demo-chat",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "LLM_BASE_URL=http://127.0.0.1:1234/v1",
+        "LLM_API_KEY=demo",
+        "LLM_MODEL=mock",
+        "uv",
+        "run",
+        "--project",
+        "backend",
+        "python",
+        "backend/scripts/ui_demo.py"
+      ],
+      "port": 8000
+    },
+    {
       "name": "mock-llm",
       "runtimeExecutable": "uv",
       "runtimeArgs": [

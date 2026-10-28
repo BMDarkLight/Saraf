@@ -48,7 +48,7 @@ function ConfirmCard({ action, onDecide, busy }: { action: Action; onDecide: (a:
         <div className="summary">{action.summary}</div>
         {action.reason && <div className="muted" style={{ fontSize: 13 }}>{action.reason}</div>}
         {live
-          ? <div className="mode-line real">این سفارش روی حساب اعتبار معاملاتی والکس با پول واقعی ثبت می‌شود.</div>
+          ? <div className="mode-line real">این سفارش روی حساب اعتبار معاملاتی با پول واقعی ثبت می‌شود.</div>
           : <div className="mode-line test">آزمایشی: روی دفتر سفارش زنده شبیه‌سازی می‌شود و پولی جابه‌جا نمی‌شود.</div>}
         <dl className="kv num">
           {r.reference_price != null && (<><dt>قیمت مرجع</dt><dd>{price(r.reference_price)} {r.quote}</dd></>)}

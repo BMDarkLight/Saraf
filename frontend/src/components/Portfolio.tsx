@@ -88,12 +88,12 @@ function AccountCard({ acc, capital, live, managed, onChanged }: {
   return (
     <div className="card rail-card">
       <div className="card-h">
-        حساب {acc.sub_account ? "اعتبار معاملاتی" : "والکس"}
+        حساب{acc.sub_account ? " اعتبار معاملاتی" : ""}
         <span className="spacer" />
         {acc.has_key && <span className="tag-real">واقعی</span>}
       </div>
       <div className="card-b acct">
-        {!acc.has_key && <div className="muted">کلید API والکس تنظیم نشده است.</div>}
+        {!acc.has_key && <div className="muted">کلید API صرافی تنظیم نشده است.</div>}
         {acc.error && <div className="err-box">{acc.error}</div>}
         {acc.key_warning && <div className="err-box">{acc.key_warning}</div>}
         {total != null && (

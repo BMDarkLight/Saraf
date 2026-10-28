@@ -72,7 +72,7 @@ async def completions(req: Request):
                 time.sleep(0.25)
         elif after_tools or notice:
             text = ("نتیجه اقدام ثبت شد. ✅" if notice else
-                    "نتیجه را در کامپوننت بالا می‌بینید. **خلاصه:** داده‌ها از والکس به‌صورت زنده گرفته شد.")
+                    "نتیجه را در کامپوننت بالا می‌بینید. **خلاصه:** داده‌ها از صرافی به‌صورت زنده گرفته شد.")
             for w in text.split(" "):
                 yield sse(chunk({"content": w + " "}))
                 time.sleep(0.02)

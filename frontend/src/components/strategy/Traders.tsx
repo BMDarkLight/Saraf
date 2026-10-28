@@ -59,7 +59,7 @@ export function TraderCards({ traders, copying, onOpen, onChanged }: { traders: 
       </div>
       <p className="muted small">معامله‌گران واقعی صرافی زنجیره‌ای Hyperliquid که همه پوزیشن‌ها و معاملاتشان روی بلاک‌چین عمومی است:
         سودده‌ترین حساب‌های بزرگ جدول رده‌بندی، به‌علاوه هر آدرسی که خودتان اضافه کنید. هر دقیقه پوزیشن‌هایشان خوانده می‌شود و
-        پوزیشن‌های لانگ در بازارهای تتری والکس شبیه‌سازی می‌شود (شورت در بازار اسپات قابل کپی نیست). وابستگی‌ای با این تریدرها نداریم.</p>
+        پوزیشن‌های لانگ در بازارهای تتری صرافی شبیه‌سازی می‌شود (شورت در بازار اسپات قابل کپی نیست). وابستگی‌ای با این تریدرها نداریم.</p>
       {adding && <AddTrader onDone={() => { setAdding(false); onChanged(); }} />}
       {!traders.length && <div className="muted small">فهرست تریدرها پس از اولین اجرای سرویس روی سرور ساخته می‌شود.</div>}
       <div className="p-grid">
@@ -191,7 +191,7 @@ export function TraderProfile({ t, d, onBack, onChanged }: { t: any; d: any; onB
           )}
         </section>
         <section className="panel">
-          <h4>کپی در والکس <span className="muted small">(کارنامه شبیه‌سازی، سرمایه ۵ میلیون تومان)</span></h4>
+          <h4>کپی در صرافی <span className="muted small">(کارنامه شبیه‌سازی، سرمایه ۵ میلیون تومان)</span></h4>
           {copyingThis && <div className="note">موتور اصلی این تریدر را کپی می‌کند: تا {Math.round(100 * (d.copying.pct ?? 0.5))}٪ حساب
             {d.live ? " با پول واقعی" : " (حالت شبیه‌سازی برنامه)"}. کارهایش در «نمای کلی» دیده می‌شود.</div>}
           <div className="t-line"><span className="muted">بازده کپی</span> <b className={`num ${tone(t.return_pct)}`}>{pctOrDash(t.return_pct)}</b>
@@ -235,7 +235,7 @@ export function TraderProfile({ t, d, onBack, onChanged }: { t: any; d: any; onB
         </section>
       </div>
       <p className="muted small">داده‌ها از API عمومی Hyperliquid خوانده می‌شود؛ نام فقط وقتی نشان داده می‌شود که خود تریدر روی Hyperliquid
-        ثبت کرده یا شما هنگام افزودن وارد کرده‌اید. کارنامه بالا شبیه‌سازی با قیمت‌ها و کارمزد واقعی والکس است؛ «کپی زنده» همین کار را
+        ثبت کرده یا شما هنگام افزودن وارد کرده‌اید. کارنامه بالا شبیه‌سازی با قیمت‌ها و کارمزد واقعی صرافی است؛ «کپی زنده» همین کار را
         روی حساب اصلی انجام می‌دهد.</p>
       {ask && (
         <ConfirmDialog title={ask === "copy" ? `کپی زنده «${label(t)}»` : "توقف کپی"} danger={d.live} busy={busy} error={err}
@@ -243,7 +243,7 @@ export function TraderProfile({ t, d, onBack, onChanged }: { t: any; d: any; onB
           onCancel={() => { setAsk(null); setErr(""); }}>
           {ask === "copy" ? (
             <>
-              <p>موتور اصلی هر دقیقه پوزیشن‌های این تریدر را می‌خواند و پوزیشن‌های لانگ او را در بازارهای تتری والکس با تتر هسته
+              <p>موتور اصلی هر دقیقه پوزیشن‌های این تریدر را می‌خواند و پوزیشن‌های لانگ او را در بازارهای تتری صرافی با تتر هسته
                 کپی می‌کند (بدون اهرم). شورت‌ها کپی نمی‌شوند و آن سهم در تتر می‌ماند. ماهواره خرید افت تا پایان کپی خاموش است.
                 سوئیچ روشن/خاموش، ترمزهای افت و فروش پایانی چالش مثل قبل کار می‌کنند.</p>
               <label className="share">حداکثر سهم حساب در کپی: <b className="num">{share}٪</b>

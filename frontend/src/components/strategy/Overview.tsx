@@ -19,9 +19,9 @@ const base = (sym?: string) => String(sym ?? "").replace(/(USDT|TMN)$/, "");
 function explainError(msg: string): string {
   const what = msg.startsWith("consolidate") ? "انتقال به هسته تتری" : msg.startsWith("final sweep") ? "فروش پایانی"
     : msg.startsWith("core") ? "خرید/فروش تتر هسته" : "سفارش";
-  if (msg.includes("قیمت بازار")) return `${what}: والکس سفارش «قیمت بازار» را در این بازار نپذیرفت.`;
+  if (msg.includes("قیمت بازار")) return `${what}: صرافی سفارش «قیمت بازار» را در این بازار نپذیرفت.`;
   if (msg.includes("did not fill")) return `${what}: سفارش پر نشد و لغو شد؛ موتور دوباره تلاش می‌کند.`;
-  if (msg.includes("network error")) return `${what}: اتصال به والکس برقرار نشد؛ موتور دوباره تلاش می‌کند.`;
+  if (msg.includes("network error")) return `${what}: اتصال به صرافی برقرار نشد؛ موتور دوباره تلاش می‌کند.`;
   if (msg.includes("LLM")) return "مدل هوش مصنوعی پاسخ نداد؛ تصمیم با قواعد گرفته شد.";
   return `${what} ناموفق بود.`;
 }

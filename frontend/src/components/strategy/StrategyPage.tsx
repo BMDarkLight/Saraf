@@ -57,7 +57,7 @@ export function StrategyPage({ onModeChanged, tab, setTab }: { onModeChanged?: (
           <>
             {d && <section className="panel run-panel">
               <h4>حساب اجرا</h4>
-              <p className="muted small">کدام حساب را موتور معامله کند: شبیه‌سازی (بدون پول واقعی) یا حساب واقعی والکس.
+              <p className="muted small">کدام حساب را موتور معامله کند: شبیه‌سازی (بدون پول واقعی) یا حساب واقعی صرافی.
                 روشن/خاموش بالای صفحه فقط خریدهای جدید را متوقف می‌کند؛ این‌جا خود حساب عوض می‌شود.</p>
               <RealSwitch on={!!d.strategy_live} liveAt={d.live_at} now={now} onChanged={changed} />
             </section>}
@@ -145,7 +145,7 @@ const VERDICT_FA = { keep: "هسته", drop: "حذف", small: "ماهواره ک
 function Evidence() {
   return (
     <>
-      <div className="muted" style={{ fontSize: 12 }}>هر جزء استراتژی با داده واقعی والکس و کارمزد واقعی حساب آزموده شد (اسکریپت‌ها در مخزن).</div>
+      <div className="muted" style={{ fontSize: 12 }}>هر جزء استراتژی با داده واقعی بازار و کارمزد واقعی حساب آزموده شد (اسکریپت‌ها در مخزن).</div>
       <table className="evidence">
         <thead><tr><th>ایده</th><th>نتیجه</th><th>تصمیم</th></tr></thead>
         <tbody>

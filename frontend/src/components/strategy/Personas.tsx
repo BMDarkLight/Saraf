@@ -54,7 +54,7 @@ export function Personas({ onApplied, params }: { onApplied: () => void; params:
     <div className="personas">
       <TraderCards traders={d.traders ?? []} copying={d.copying} onOpen={setOpen} onChanged={load} />
       <div className="sec-h"><h4>پرسوناهای استراتژی</h4></div>
-      <p className="muted">هر پرسونا یک نسخه از استراتژی با تنظیمات خودش است که روی سرور به‌صورت شبیه‌سازی (داده واقعی والکس، بدون
+      <p className="muted">هر پرسونا یک نسخه از استراتژی با تنظیمات خودش است که روی سرور به‌صورت شبیه‌سازی (داده واقعی بازار، بدون
         سفارش واقعی) اجرا می‌شود؛ کارنامه‌ای که می‌بینید همان اجراست. با «کپی» موتور اصلی تنظیمات آن پرسونا را می‌گیرد.</p>
       {d.copying && (
         <div className="note">موتور در حال کپی از <b>{d.copying.name}</b> است{d.copying.modified ? " (با تغییرات شما)" : ""}.</div>
