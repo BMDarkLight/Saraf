@@ -1,4 +1,4 @@
-"""The USDT core: the part of the strategy the evidence supports most (docs/hackathon/STRATEGY.md).
+"""The USDT core: the part of the strategy the evidence supports most.
 
 USDT/TMN has risen with the toman's depreciation (+78% over 180 days; 72h windows positive 65% of
 the time over the last 60 days), and every rule that tried to time USDT vs TMN lost to simply
