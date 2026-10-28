@@ -1,4 +1,4 @@
-"""Live trader personas: following real Hyperliquid traders' public positions with a simulated copy on Wallex."""
+"""Live trader personas: following real Hyperliquid traders' public positions with a simulated copy on the default venue."""
 
 import csv
 import json
@@ -23,7 +23,7 @@ def test_coin_names_map_to_venue_bases():
     assert venue_base("BTC") == "BTC" and venue_base("kPEPE") == "PEPE" and venue_base("@107") is None
 
 
-def test_only_longs_on_wallex_markets_are_copied_and_leverage_is_dropped():
+def test_only_longs_on_listed_markets_are_copied_and_leverage_is_dropped():
     w, skipped = target_weights(pos(("BTC", "long", 1, 300_000), ("ETH", "short", 1, 200_000), ("HYPE", "long", 1, 100_000),
                                     ("kPEPE", "long", 1, 100_000)), set(PRICES))
     assert w == {"BTCUSDT": 0.3, "PEPEUSDT": 0.1}
@@ -112,7 +112,7 @@ def test_followed_puts_the_owners_traders_first(tmp_path):
 
 async def test_pick_prefers_traders_a_spot_copy_can_follow():
     """The leaderboard's top accounts were all short on 2026-10-23: their copies sat in USDT. The pick now reads each
-    candidate's book and keeps the profitable ones with real longs on Wallex markets."""
+    candidate's book and keeps the profitable ones with real longs on the venue's markets."""
     rows = [{"address": a, "account_usd": 5e6, "pnl_week": 1, "pnl_month": m, "pnl_allTime": 1}
             for a, m in (("0xshort", 90), ("0xlong", 50), ("0xempty", 80), ("0xsmall_long", 70))]
     books = {"0xshort": pos(("BTC", "short", 1, 4_000_000)), "0xlong": pos(("BTC", "long", 1, 2_000_000)),

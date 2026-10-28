@@ -1,5 +1,5 @@
 """Live trader personas: follow real traders' public positions on Hyperliquid and copy them on a venue (simulated;
-the default venue, Wallex, unless DEFAULT_VENUE says otherwise).
+the default venue).
 
 Hyperliquid is an on-chain perpetuals exchange: every account's open positions and fills are public through its
 info API (no key). The followed traders are either picked from its public leaderboard by verified profit, or added by

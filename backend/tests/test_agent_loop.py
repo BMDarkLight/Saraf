@@ -1,6 +1,6 @@
 """Agent loop test with a scripted fake OpenAI-compatible LLM (no API key needed).
 
-Market data comes from the live Wallex public API, trades run in paper mode.
+Market data comes from the default venue's live public API, trades run in paper mode.
 """
 
 import json

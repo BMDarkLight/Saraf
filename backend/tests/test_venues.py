@@ -37,7 +37,7 @@ async def test_tools_read_another_venue_by_name(ctx):
     a = TOOLS["list_markets"].args(venue="other")
     rows = await TOOLS["list_markets"].handler(ctx, a)
     assert [r["symbol"] for r in rows] == ["GOLDIRR"]
-    # without a venue the default (the fake Wallex) answers
+    # without a venue the default (the fake) answers
     rows = await TOOLS["list_markets"].handler(ctx, TOOLS["list_markets"].args())
     assert "BTCUSDT" in [r["symbol"] for r in rows]
 
@@ -70,6 +70,15 @@ def test_every_venue_implements_market_data():
     for cls in (WallexClient, TseClient):
         assert issubclass(cls, Venue)
         assert not getattr(cls, "__abstractmethods__", None)
+
+
+def test_order_errors_are_explained_by_their_venue():
+    # the generic default passes the message through; the exchange's own adapter knows its error codes
+    assert FakeClient().explain_order_error("1006", key_flagged=True) == "1006"
+    c = WallexClient(api_key="k")
+    assert c.explain_order_error("error 1006", key_flagged=False) == "error 1006"
+    hint = c.explain_order_error("error 1006", key_flagged=True)
+    assert "کلید API" in hint and hint.endswith("(error 1006)")
 
 
 def test_ctx_market_is_the_default_venue_without_a_name(tmp_path, fake):

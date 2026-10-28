@@ -5,7 +5,8 @@ import statistics as st
 
 from edge_research import hourly
 from rotation_research import ema
-from saraf.venues.wallex import WallexClient
+from saraf.config import get_settings
+from saraf.venues import create
 
 FEE = 0.003
 
@@ -30,7 +31,7 @@ def run(c: list[float], rule, lo: int, hi: int) -> str:
 
 
 async def main() -> None:
-    cl = WallexClient()
+    cl = create(get_settings().default_venue, get_settings())
     c = [r["c"] for r in await hourly(cl, "USDTTMN", 180)]
     e72, e168 = ema(c, 72), ema(c, 168)
     rules = {

@@ -204,7 +204,7 @@ class SimFeed:
         return []   # historical headlines are not reproducible; documented limitation
 
     async def min_notional(self, symbol: str) -> float:
-        return 50_000 if symbol.endswith("TMN") else 1.0   # Wallex /v1/markets minNotional: 50k TMN / 1 USDT
+        return 50_000 if symbol.endswith("TMN") else 1.0   # typical exchange minNotional: 50k TMN / 1 USDT
 
     def future_1m(self, symbol: str, start: float, end: float) -> list[Bar]:
         times = self._t1[symbol]
@@ -214,7 +214,7 @@ class SimFeed:
 
 async def load_history(venue: Venue, symbols: list[str], start: int, end: int, cache_dir: Path,
                        warmup_hours: int = 150, tf_minutes: int = 15) -> tuple[dict, dict]:
-    """1m bars in day chunks (Wallex returns at most 1440 per call) and 1h bars with warm-up,
+    """1m bars in day chunks (venues cap candles per call; 1440 = one day of 1m bars) and 1h bars with warm-up,
     cached on disk so reruns are offline and identical."""
     cache_dir.mkdir(parents=True, exist_ok=True)
 

@@ -15,7 +15,7 @@ class AppContext:
     spot: SpotBroker
     futures: FuturesBroker
     alerts: AlertStore
-    # set by the server: the venue flagged its API key (e.g. a Wallex main-account key for a trade-credit account)
+    # set by the server: the venue flagged its API key (e.g. a main-account key for a trade-credit account)
     key_is_main: bool = False
     venues: Venues | None = field(default=None, repr=False)
 

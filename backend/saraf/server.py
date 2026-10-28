@@ -485,7 +485,7 @@ _key_check: dict = {"at": 0.0, "warning": None}
 
 
 async def check_trading_key() -> str | None:
-    """The default venue's warning about its API key, if any (e.g. a Wallex main-account key configured for a
+    """The default venue's warning about its API key, if any (e.g. a main-account key configured for a
     trade-credit sub-account: orders would fail with 1006). Checked at most every 10 minutes."""
     if not ctx.venue.has_key:
         return None

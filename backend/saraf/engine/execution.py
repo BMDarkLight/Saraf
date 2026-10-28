@@ -1,5 +1,5 @@
 """Order execution. SpotExec trades through a SpotBroker (paper = shadow test on the live
-order book, live = real Wallex orders); SimExec fills against the replayed history."""
+order book, live = real orders on the venue); SimExec fills against the replayed history."""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ class SpotExec:
         notional = float(order.get("executedSum") or 0)
         price = notional / qty if qty else float(order.get("price") or 0)
         status = "filled" if order.get("status") == "FILLED" else "open" if order.get("active", True) else "canceled"
-        if side == "BUY":   # Wallex charges the buyer's fee in the received coin
+        if side == "BUY":   # the venue charges the buyer's fee in the received coin
             return OrderState(order["clientOrderId"], status, qty * (1 - self.fee_rate), price, notional)
         return OrderState(order["clientOrderId"], status, qty, price, notional * (1 - self.fee_rate))
 

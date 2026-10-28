@@ -7,7 +7,7 @@ Wants=network-online.target
 WorkingDirectory=/opt/saraf/backend
 EnvironmentFile=/opt/saraf/.env
 Environment=PYTHONUNBUFFERED=1 TZ=UTC
-# shadow only: reads public positions, simulates the copy at live Wallex prices, never places orders
+# shadow only: reads public positions, simulates the copy at live exchange prices, never places orders
 ExecStart=/root/.local/bin/uv run --no-dev python -m saraf.traders run
 Restart=always
 RestartSec=30

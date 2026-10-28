@@ -16,7 +16,7 @@ from .config import Settings
 from .personas import PERSONAS
 from .tuning import BY_KEY, PARAMS, TuningError, validate
 
-SYSTEM = """You are the strategy assistant of an autonomous trading engine on the Wallex exchange (Iran).
+SYSTEM = """You are the strategy assistant of an autonomous trading engine on an Iranian crypto exchange.
 The person running it chats with you about the strategy. Answer in Persian (Farsi), briefly and concretely
 (at most ~6 short sentences or a short list). You can change the tunable parameters below with two tools:
 - `apply_changes`: sets them NOW (the engine restarts with them). Use it whenever the person asks you to set, change,

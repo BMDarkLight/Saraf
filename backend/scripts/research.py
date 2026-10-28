@@ -14,7 +14,7 @@ from saraf.config import ROOT, get_settings
 from saraf.engine.feeds import LiveFeed, load_history
 from saraf.engine.features import closed, compute, resample
 from saraf.engine.strategy import candidates
-from saraf.venues.wallex import WallexClient
+from saraf.venues import create
 
 GRID = [(1.0, 2.0), (1.5, 2.0), (1.5, 3.0), (2.0, 3.0), (2.0, 4.0), (2.5, 5.0)]
 
@@ -40,7 +40,7 @@ async def main():
     ap.add_argument("--horizon-bars", type=int, default=32)
     a = ap.parse_args()
     s = get_settings()
-    client = WallexClient()
+    client = create(s.default_venue, s)
     end = (time.time() // 3600) * 3600
     start = end - a.days * 86400
     split = end - a.oos_days * 86400

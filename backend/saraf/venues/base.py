@@ -3,7 +3,7 @@
 Everything above this layer (agent tools, analytics, paper brokers, the engine, the server) talks to a `Venue`,
 never to an exchange's own client, so a new venue is one adapter plus a `register()` call (see registry.py).
 
-Market data uses one schema for every venue (the shapes below). It is the shape the first adapter (Wallex)
+Market data uses one schema for every venue (the shapes below). It is the shape the first adapter
 already returned, so its client needs no translation; other adapters normalise their API into it.
 """
 
@@ -169,6 +169,11 @@ class Venue(ABC):
     async def account_warning(self) -> str | None:
         """A problem with the configured credentials worth showing the user (e.g. a key for the wrong account)."""
         return None
+
+    def explain_order_error(self, message: str, key_flagged: bool) -> str:
+        """A live order's error as the user should read it. A venue may turn its own error codes into advice;
+        key_flagged says account_warning() complained about the key."""
+        return message
 
     # -------------------------------------------------------------------------------------------- brokers
     def live_spot_broker(self) -> "SpotBroker":

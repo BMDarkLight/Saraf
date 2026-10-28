@@ -1,7 +1,7 @@
 """Copying a real trader inside the engine (copy-trading «کپی زنده»): ENGINE_FOLLOW_ADDRESS names a Hyperliquid
-account whose public positions the engine mirrors on Wallex USDT markets, with at most ENGINE_FOLLOW_PCT of equity.
+account whose public positions the engine mirrors on the venue's USDT markets, with at most ENGINE_FOLLOW_PCT of equity.
 
-Every minute the trader's open positions are read; their longs in coins Wallex lists become target weights of the
+Every minute the trader's open positions are read; their longs in coins the venue lists become target weights of the
 copy budget (their leverage dropped, at most 100%), and the engine buys or sells toward them from its USDT (the core
 holds the rest). Shorts cannot be copied on spot: those coins are held at 0. A change of under 2% of the budget is
 left alone (fees). New buys stop with the on/off switch, a drawdown pause, a halt and the no-entry window before the
@@ -17,7 +17,7 @@ from ..traders import Hyperliquid, describe_changes, target_weights, venue_base
 
 POLL_SECONDS = 60
 BAND = 0.02
-MIN_ORDER_USDT = 1.2   # Wallex's USDT-market minimum is 1 USDT
+MIN_ORDER_USDT = 1.2   # the venue's USDT-market minimum is 1 USDT
 
 
 def _usd(v: float) -> str:
@@ -83,7 +83,7 @@ class FollowCopy:
             sym = f"{base}USDT"
             try:
                 q = await self.e.feed.quote(sym)
-            except Exception:   # not listed on Wallex
+            except Exception:   # not listed on the venue
                 continue
             if q.get("bid") and q.get("ask"):
                 out[sym] = q
@@ -140,7 +140,7 @@ class FollowCopy:
         st, e = self.st, self.e
         held = st["holdings"].get(sym, 0.0)
         qty = min(qty, held, await e.broker.holding(sym[:-4]))
-        if qty * q["bid"] < 1.0:   # dust Wallex won't take: forget it rather than retry forever
+        if qty * q["bid"] < 1.0:   # dust the venue won't take: forget it rather than retry forever
             if held * q["bid"] < 1.0:
                 st["holdings"].pop(sym, None)
                 st["cost"].pop(sym, None)

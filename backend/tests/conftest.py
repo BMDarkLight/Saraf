@@ -1,4 +1,4 @@
-"""Shared fixtures. `FakeClient` is a deterministic stand-in venue (shaped like Wallex's market data) whose
+"""Shared fixtures. `FakeClient` is a deterministic stand-in venue (shaped like a crypto exchange's market data) whose
 prices tests can move, so fills, TP/SL and liquidations are exactly reproducible."""
 
 import pytest

@@ -1,1 +1,1 @@
-"""Autonomous AI trading engine for the Wallex Agentic AI challenge."""
+"""Autonomous AI trading engine: rule-based setups, an LLM decider and deterministic risk."""

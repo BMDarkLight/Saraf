@@ -10,7 +10,7 @@ from ..config import Settings
 from ..venues.base import Venue
 from .base import BrokerError, JsonState, MarketInfo, SpotBroker, round_down, state_path
 
-PAPER_FEE = 0.002  # typical Iranian crypto exchange spot taker fee (Wallex: ~0.2-0.25%)
+PAPER_FEE = 0.002  # typical Iranian crypto exchange spot taker fee (~0.2-0.25%)
 
 
 def _now() -> str:

@@ -1,5 +1,5 @@
 """Regression tests for small-model quirks seen with Gemma 4 E4B on LM Studio, plus the
-generative-UI and alert tools. Market data comes from the live public Wallex API."""
+generative-UI and alert tools. Market data comes from the default venue's live public API."""
 
 import json
 import os
@@ -63,7 +63,7 @@ def test_compat_history_has_no_tool_roles():
 
 # ------------------------------------------------------------ generative UI
 @pytest.mark.skipif(os.environ.get("RUNNER_ENVIRONMENT") == "github-hosted",
-                    reason="calls the live Wallex API, unreliable from GitHub's US runners")
+                    reason="calls the default venue's live API, unreliable from GitHub's US runners")
 async def test_genui_tools_render_and_hide_payload_from_model(agent):
     cases = {
         "show_comparison_chart": dict(symbols="BTCUSDT,ETHUSDT,NOPEUSDT", hours=24),

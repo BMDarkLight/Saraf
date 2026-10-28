@@ -11,7 +11,8 @@ import asyncio
 import statistics as st
 
 from edge_research import hourly
-from saraf.venues.wallex import WallexClient
+from saraf.config import get_settings
+from saraf.venues import create
 
 USDT_FEE = 0.0013     # taker on USDT markets for the credit account
 SPLIT_DAYS = 60
@@ -67,7 +68,7 @@ def run(rule: str, usdt: list[float], closes: dict[str, list[float]], lo: int, h
 
 
 async def main() -> None:
-    c = WallexClient()
+    c = create(get_settings().default_venue, get_settings())
     u = {r["t"]: r["c"] for r in await hourly(c, "USDTTMN", 180)}
     raw = {s: {r["t"]: r["c"] for r in await hourly(c, f"{s}USDT", 180)} for s in ("BTC", "ETH")}
     ts = sorted(t for t in u if all(t in raw[s] for s in raw))

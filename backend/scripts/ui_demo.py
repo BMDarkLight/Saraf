@@ -1,7 +1,7 @@
 """Run the web app on fake but realistic data, for UI work without a venue's API (and for screenshots).
 
   uv run python scripts/ui_demo.py            # http://127.0.0.1:8000
-Writes sample engine journals under data/engine (git-ignored) and swaps the default venue (Wallex-shaped data), its
+Writes sample engine journals under data/engine (git-ignored) and swaps the default venue, its
 real-account broker and the sentiment feed with deterministic fakes. Never use it on the VPS: it overwrites data/engine.
 """
 
@@ -101,7 +101,7 @@ def write_journals(root: Path) -> None:
                "reason": "RSI زیر ۳۰ و قیمت زیر باند پایین بولینگر در روند ساعتی خنثی."},
               {"ts": now - 600, "time": t(600), "event": "core", "action": "BUY_USDT", "reason": "core: hold USDT"}]
         if name == "live":   # what the live journal showed on 2026-10-23: refused market orders, then the fix
-            refused = 'Wallex: اطلاعات وارد شده اشتباه‌است.: {"symbol": ["امکان ثبت سفارش قیمت بازار در USOONUSDT بازار وجود ندارد."]}'
+            refused = 'اطلاعات وارد شده اشتباه‌است.: {"symbol": ["امکان ثبت سفارش قیمت بازار در USOONUSDT بازار وجود ندارد."]}'
             for k in range(6):
                 ev += [{"ts": now - 400 + 15 * k, "time": t(400 - 15 * k), "event": "error", "symbol": s,
                         "error": f"consolidate sell failed: {m}"}

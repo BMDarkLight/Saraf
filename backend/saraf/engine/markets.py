@@ -1,4 +1,4 @@
-"""Markets that cannot be traded from a Wallex trade-credit (prop) account.
+"""Markets that cannot be traded from a trade-credit (prop) account.
 
 Source: the challenge organisers' list (2026-10-22). The trade-credit account is spot-only, no leverage.
 """

@@ -46,6 +46,7 @@ class Venue(ABC):
     def live_spot_broker(self) -> SpotBroker
     def live_futures_broker(self, settings) -> FuturesBroker
     async def account_warning(self) -> str | None                   # e.g. an API key that can't trade
+    def explain_order_error(self, message, key_flagged) -> str      # turn the venue's error codes into advice
 ```
 
 `Capabilities` says what the venue can do, and tools check it before calling:

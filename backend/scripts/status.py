@@ -19,7 +19,7 @@ from pathlib import Path
 
 from saraf.brokers.base import safe_float
 from saraf.config import ROOT, get_settings
-from saraf.venues.wallex import WallexClient
+from saraf.venues import create
 
 SHOW = ("engine_quote", "engine_decider", "engine_end_time", "engine_fee_rate", "engine_maker_fee_rate",
         "engine_max_exposure_pct", "engine_max_position_pct", "engine_max_positions", "engine_risk_per_trade_pct",
@@ -102,7 +102,7 @@ def report_run(d: Path, n_events: int) -> None:
 
 async def market_facts() -> None:
     s = get_settings()
-    c = WallexClient(s.wallex_base_url, s.wallex_api_key, sub_account=s.wallex_sub_account_client_id)
+    c = create(s.default_venue, s)
     try:
         m = await c.markets()
         u = m.get("USDTTMN", {})
@@ -116,7 +116,7 @@ async def market_facts() -> None:
               and safe_float(v.get("stats", {}).get("24h_quoteVolume")) > 0]
         if ch:
             print(f"USDT-market breadth: {100 * sum(x > 0 for x in ch) / len(ch):.1f}% of {len(ch)} up over 24h")
-        if s.wallex_api_key:
+        if c.has_key:
             try:
                 fees = await c.fees()
                 print("account fees:", json.dumps(fees, ensure_ascii=False)[:800])
@@ -162,7 +162,7 @@ async def signal_scan() -> None:
             prof[k.strip().lower()] = v.strip()
     s = s.model_copy(update={k: type(getattr(s, k))(v) if not isinstance(getattr(s, k), bool) else v == "true"
                              for k, v in prof.items() if hasattr(s, k)})
-    c = WallexClient(s.wallex_base_url, s.wallex_api_key, sub_account=s.wallex_sub_account_client_id)
+    c = create(s.default_venue, s)
     feed = LiveFeed(c, s)
     print("\n================ SIGNAL SCAN (strategy profile) ================")
     print(f"filters: ATR% {s.engine_min_atr_pct}..{s.engine_max_atr_pct}, min score {s.engine_min_score}, setups {s.engine_setups}")

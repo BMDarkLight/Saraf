@@ -258,10 +258,8 @@ class Agent:
             action.status = "failed"
         except Exception as e:
             msg = str(e) or type(e).__name__
-            if "1006" in msg and action.mode == "live" and self.ctx.key_is_main:
-                msg = ("کلید API روی سرور مال حساب اصلی والکس است، نه حساب اعتبار معاملاتی؛ والکس سفارش را با موجودی "
-                       "حساب اصلی (صفر) می‌سنجد. در والکس حساب «هکاتون» را انتخاب کنید، برای همان حساب کلید API با "
-                       f"دسترسی معامله بسازید و جایگزین کنید. ({msg})")
+            if action.mode == "live":
+                msg = self.ctx.venue.explain_order_error(msg, self.ctx.key_is_main)
             action.result = {"error": msg}
             action.status = "failed"
         return action

@@ -1,6 +1,6 @@
 """Copy-trading personas: named strategy presets, each with a public profile and its own track record.
 
-Every persona runs on the VPS as a shadow session (real Wallex data, simulated fills on the live order book, no
+Every persona runs on the VPS as a shadow session (real market data, simulated fills on the live order book, no
 real orders) with its own journal in data/engine/persona-<id>, so its profile shows what it actually did, not a
 made-up history. The "strategist" persona is the existing strategy session (data/engine/strategy), which already
 runs the AI decider. Copying a persona writes its preset to data/engine/tuning.env (tuning.py) and restarts the

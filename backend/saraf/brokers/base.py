@@ -17,7 +17,7 @@ class BrokerError(Exception):
 
 
 def safe_float(x) -> float:
-    """Venues return "-" (Wallex) or nothing instead of a number for inactive markets."""
+    """Venues return "-" or nothing instead of a number for inactive markets."""
     try:
         return float(x)
     except (TypeError, ValueError):

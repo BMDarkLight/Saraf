@@ -229,6 +229,14 @@ class WallexClient(Venue):
     async def account_warning(self) -> str | None:
         return KEY_WARNING if self.has_key and await self.key_is_main_account() else None
 
+    def explain_order_error(self, message: str, key_flagged: bool) -> str:
+        # 1006 = insufficient balance: with a main-account key, orders are checked against the (empty) main account
+        if "1006" in message and key_flagged:
+            return ("کلید API روی سرور مال حساب اصلی والکس است، نه حساب اعتبار معاملاتی؛ والکس سفارش را با موجودی "
+                    "حساب اصلی (صفر) می‌سنجد. در والکس حساب «هکاتون» را انتخاب کنید، برای همان حساب کلید API با "
+                    f"دسترسی معامله بسازید و جایگزین کنید. ({message})")
+        return message
+
     def live_spot_broker(self):
         from .brokers import WallexSpotBroker
         return WallexSpotBroker(self)

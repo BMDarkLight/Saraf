@@ -4,7 +4,7 @@
   2. Triangular gaps: X/TMN vs X/USDT x USDT/TMN (history from hourly closes + live executable books)
   3. Holding BTC/ETH vs USDT over 72h windows, in TMN
 
-Run on the VPS (Wallex API):  uv run python scripts/edge_research.py
+Run on the VPS (default venue's API):  uv run python scripts/edge_research.py
 """
 
 import asyncio
@@ -13,13 +13,14 @@ import time
 
 from saraf.brokers.base import safe_float
 from saraf.engine.markets import CREDIT_BLOCKED
-from saraf.venues.wallex import WallexClient
+from saraf.config import get_settings
+from saraf.venues import Venue, create
 
 FEE = 0.003           # taker, per side, as /v1/account/fee reports for the credit account
 DAY = 86_400
 
 
-async def hourly(c: WallexClient, sym: str, days: int) -> list[dict]:
+async def hourly(c: Venue, sym: str, days: int) -> list[dict]:
     end, out = int(time.time()), []
     for start in range(end - days * DAY, end, 30 * DAY):   # the API caps a request's range
         out += await c.candles(sym, "60", start, min(start + 30 * DAY, end))
@@ -50,7 +51,7 @@ def fmt(d: dict) -> str:
 
 
 async def main() -> None:
-    c = WallexClient()
+    c = create(get_settings().default_venue, get_settings())
     import sys
     if "--skip-usdt" in sys.argv:
         u = await hourly(c, "USDTTMN", 30)

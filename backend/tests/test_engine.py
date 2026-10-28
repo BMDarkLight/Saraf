@@ -619,7 +619,7 @@ class FakeHL:
 
 
 async def test_live_copy_follows_a_traders_longs_with_part_of_the_account(tmp_path):
-    """Copy-trading a real trader in the engine: longs on Wallex USDT markets are bought from the core's USDT with at
+    """Copy-trading a real trader in the engine: longs on the venue's USDT markets are bought from the core's USDT with at
     most ENGINE_FOLLOW_PCT of equity, shorts are not copied, a close is sold, the satellite stays off, and stopping
     the copy sells what it bought."""
     addr = "0x" + "ab" * 20
