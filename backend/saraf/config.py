@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     # Bitpin: API key and secret from the panel's API section
     bitpin_api_key: str = ""
     bitpin_secret_key: str = ""
+    # Ramzinex: API key and secret from API management
+    ramzinex_api_key: str = ""
+    ramzinex_secret: str = ""
 
     # Trading mode: "paper" simulates fills against the venue's live prices, "live" sends real orders.
     spot_mode: Literal["paper", "live"] = "paper"
