@@ -12,6 +12,7 @@ dependencies = [
     "pydantic-settings>=2.4",
     "beautifulsoup4>=4.12",
     "ddgs>=9.0",
+    "cryptography>=42",
 ]
 
 [dependency-groups]

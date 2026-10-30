@@ -84,10 +84,37 @@ class Trade(TypedDict, total=False):
     timestamp: str
 
 
+class Order(TypedDict, total=False):
+    """A spot order as live brokers return it. Every adapter maps its own order into this shape."""
+    clientOrderId: str        # Saraf's id for the order (the venue's own id when it has no client ids)
+    symbol: str
+    side: str                 # BUY | SELL
+    type: str                 # LIMIT | MARKET
+    price: float | str
+    origQty: float | str
+    executedQty: float | str
+    executedSum: float | str  # quote spent or received so far
+    executedPrice: float | str
+    status: str               # NEW | PARTIALLY_FILLED | FILLED | CANCELED
+    active: bool
+    created: str
+
+
 class FuturesMarket(TypedDict):
     symbol: str
     max_leverage: float
     price: float | str
+
+
+@dataclass(frozen=True)
+class Credential:
+    """One value a venue needs to connect, e.g. an API key. `key` is the Settings field it is stored in."""
+    key: str
+    label: str
+    label_fa: str
+    secret: bool = True
+    required: bool = True
+    help: str = ""
 
 
 @dataclass(frozen=True)
@@ -107,6 +134,7 @@ class Venue(ABC):
     title: ClassVar[str]              # display name
     title_fa: ClassVar[str] = ""
     capabilities: ClassVar[Capabilities]
+    credentials: ClassVar[tuple[Credential, ...]] = ()
 
     @property
     def has_key(self) -> bool:
@@ -115,7 +143,21 @@ class Venue(ABC):
 
     def describe(self) -> dict:
         return {"name": self.name, "title": self.title, "title_fa": self.title_fa or self.title,
-                "has_key": self.has_key, **asdict(self.capabilities)}
+                "has_key": self.has_key, "credentials": [c.key for c in self.credentials],
+                **asdict(self.capabilities)}
+
+    async def test_connection(self) -> dict:
+        """Check the venue answers: the account behind the key when one is set, the market list otherwise."""
+        try:
+            if self.has_key and self.capabilities.account:
+                bal = await self.balances()
+                held = sorted(a for a, b in bal.items() if float(b.get("value") or 0))
+                shown = ", ".join(held[:6]) + ("…" if len(held) > 6 else "")
+                return {"ok": True, "message": f"account reachable; holds {shown or 'nothing yet'}"}
+            n = len(await self.markets())
+            return {"ok": True, "message": f"{n} markets"}
+        except VenueError as e:
+            return {"ok": False, "message": str(e)}
 
     async def aclose(self) -> None:
         pass
@@ -178,7 +220,10 @@ class Venue(ABC):
     # -------------------------------------------------------------------------------------------- brokers
     def live_spot_broker(self) -> "SpotBroker":
         """The broker that sends real spot orders here. Paper brokers work on any venue's market data."""
-        self._no("live trading")
+        if not self.capabilities.trading:
+            self._no("live trading")
+        from ..brokers.live import VenueSpotBroker
+        return VenueSpotBroker(self)
 
     def live_futures_broker(self, settings: "Settings") -> "FuturesBroker":
         self._no("live futures")
