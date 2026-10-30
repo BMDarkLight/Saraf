@@ -84,3 +84,15 @@ class HttpVenue(Venue):
         except ValueError:
             raise VenueError(f"{self.title}: non-JSON response from {path} (HTTP {r.status_code})",
                              r.status_code, r.text[:300]) from None
+
+
+def jwt_exp(token: str) -> float:
+    """The `exp` claim of a JWT (unverified, only to know when to renew it); 0 when it can't be read."""
+    import base64
+    import json
+
+    try:
+        payload = token.split(".")[1]
+        return float(json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))["exp"])
+    except (IndexError, ValueError, KeyError, TypeError):
+        return 0.0
