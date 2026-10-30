@@ -7,11 +7,11 @@ from .sources import NavasanClient, TetherlandClient
 __all__ = ["NavasanClient", "TetherlandClient"]
 
 
-@register("tetherland")
+@register("tetherland", TetherlandClient)
 def _tetherland(settings: Settings) -> TetherlandClient:
     return TetherlandClient()
 
 
-@register("navasan")
+@register("navasan", NavasanClient)
 def _navasan(settings: Settings) -> NavasanClient:
     return NavasanClient(settings.navasan_api_key)

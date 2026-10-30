@@ -7,6 +7,6 @@ from .client import BinanceClient
 __all__ = ["BinanceClient"]
 
 
-@register("binance")
+@register("binance", BinanceClient)
 def _make(settings: Settings) -> BinanceClient:
     return BinanceClient()

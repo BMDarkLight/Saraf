@@ -156,4 +156,7 @@ def get_settings() -> Settings:
     if not s.llm_api_key and os.environ.get("OPENAI_API_KEY"):
         s.llm_api_key = os.environ["OPENAI_API_KEY"]
     s.data_dir.mkdir(parents=True, exist_ok=True)
+    # values saved from the settings screen win over the environment
+    from . import connections
+    connections.apply(s, connections.load(s.data_dir))
     return s

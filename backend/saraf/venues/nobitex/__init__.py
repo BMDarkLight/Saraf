@@ -8,6 +8,6 @@ from .client import NobitexClient, sign
 __all__ = ["NobitexClient", "sign"]
 
 
-@register("nobitex")
+@register("nobitex", NobitexClient)
 def _make(settings: Settings) -> NobitexClient:
     return NobitexClient(settings.nobitex_api_key, settings.nobitex_private_key, settings.nobitex_token)

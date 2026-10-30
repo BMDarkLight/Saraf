@@ -8,6 +8,6 @@ from .client import BitpinClient
 __all__ = ["BitpinClient"]
 
 
-@register("bitpin")
+@register("bitpin", BitpinClient)
 def _make(settings: Settings) -> BitpinClient:
     return BitpinClient(settings.bitpin_api_key, settings.bitpin_secret_key)

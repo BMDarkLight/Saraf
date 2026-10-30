@@ -13,17 +13,26 @@ from __future__ import annotations
 from typing import Callable
 
 from ..config import Settings
-from .base import Venue, VenueError
+from .base import Credential, Venue, VenueError
 
 Factory = Callable[[Settings], Venue]
 _FACTORIES: dict[str, Factory] = {}
+_CLASSES: dict[str, type[Venue]] = {}
 
 
-def register(name: str) -> Callable[[Factory], Factory]:
+def register(name: str, cls: type[Venue] | None = None) -> Callable[[Factory], Factory]:
+    """`cls` lets the settings screen list a venue's credential fields without creating the venue."""
     def deco(factory: Factory) -> Factory:
         _FACTORIES[name] = factory
+        if cls is not None:
+            _CLASSES[name] = cls
         return factory
     return deco
+
+
+def credentials_of(name: str) -> tuple[Credential, ...]:
+    cls = _CLASSES.get(name.lower())
+    return cls.credentials if cls else ()
 
 
 def available() -> list[str]:
@@ -57,6 +66,14 @@ class Venues:
         if name not in self._open:
             self._open[name] = create(name, self.settings)
         return self._open[name]
+
+    async def reload(self, name: str) -> Venue:
+        """Re-create a venue from the current settings (after its connection changed)."""
+        name = name.lower()
+        old = self._open.pop(name, None)
+        if old is not None:
+            await old.aclose()
+        return self.get(name)
 
     def describe(self) -> list[dict]:
         out = []
