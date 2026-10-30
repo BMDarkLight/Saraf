@@ -53,6 +53,7 @@ class Venues:
     def __init__(self, settings: Settings, default: Venue | None = None):
         self.settings = settings
         self._open: dict[str, Venue] = {}
+        self._retired: list[Venue] = []   # replaced by reload(); closed at shutdown, as requests may still use them
         if default is not None:
             self._open[default.name] = default
         self.default_name = default.name if default is not None else settings.default_venue
@@ -72,7 +73,7 @@ class Venues:
         name = name.lower()
         old = self._open.pop(name, None)
         if old is not None:
-            await old.aclose()
+            self._retired.append(old)
         return self.get(name)
 
     def describe(self) -> list[dict]:
@@ -83,5 +84,5 @@ class Venues:
         return out
 
     async def aclose(self) -> None:
-        for v in self._open.values():
+        for v in [*self._open.values(), *self._retired]:
             await v.aclose()

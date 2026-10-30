@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import time
-from decimal import Decimal
+from decimal import ROUND_DOWN, Decimal
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -19,6 +21,24 @@ def fmt_dec(x: float | str | Decimal) -> str:
     if "." in s:
         s = s.rstrip("0").rstrip(".")
     return s or "0"
+
+
+def round_down_dec(x: Decimal, decimals: int) -> Decimal:
+    return x.quantize(Decimal(1).scaleb(-decimals), rounding=ROUND_DOWN)
+
+
+def plain_json(body: Any) -> bytes:
+    """JSON with Decimal values written as plain numbers (json.dumps would turn 0.00001 into 1e-05)."""
+    def mark(x):
+        if isinstance(x, Decimal):
+            return f"\0num:{fmt_dec(x)}\0"
+        if isinstance(x, dict):
+            return {k: mark(v) for k, v in x.items()}
+        if isinstance(x, list):
+            return [mark(v) for v in x]
+        return x
+    text = json.dumps(mark(body), ensure_ascii=False)
+    return re.sub(r'"\\u0000num:(-?[0-9.]+)\\u0000"', r"\1", text).encode()
 
 
 def rial_to_toman(x: Any) -> float:

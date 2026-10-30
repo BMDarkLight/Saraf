@@ -65,7 +65,7 @@ class BitpinClient(HttpVenue):
     title_fa = "بیت‌پین"
     capabilities = Capabilities(asset_class="crypto", candles=tuple(RESOLUTIONS), trading=True, account=True)
     credentials = (
-        Credential("bitpin_api_key", "API key", "کلید API", secret=False,
+        Credential("bitpin_api_key", "API key", "کلید API",
                    help="بیت‌پین ← پروفایل ← API. کلید به فهرست IP بسته می‌شود؛ IP همین سرور را اضافه کنید."),
         Credential("bitpin_secret_key", "Secret key", "کلید مخفی"),
     )
@@ -210,6 +210,7 @@ class BitpinClient(HttpVenue):
 
     async def get_order(self, order_id: str) -> dict:
         rows = await self._call("GET", "/api/v1/odr/orders/", params={"identifier": order_id}, auth=True)
+        rows = [o for o in rows or [] if o.get("identifier") == order_id]   # don't trust the filter blindly
         if not rows and str(order_id).isdigit():
             return self._order(await self._call("GET", f"/api/v1/odr/orders/{order_id}/", auth=True))
         if not rows:

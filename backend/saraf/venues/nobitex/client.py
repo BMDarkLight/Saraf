@@ -15,6 +15,7 @@ import json
 import time
 import uuid
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 import httpx
@@ -54,7 +55,7 @@ class NobitexClient(HttpVenue):
     title_fa = "نوبیتکس"
     capabilities = Capabilities(asset_class="crypto", candles=tuple(RESOLUTIONS), trading=True, account=True)
     credentials = (
-        Credential("nobitex_api_key", "API key", "کلید API", secret=False, required=False,
+        Credential("nobitex_api_key", "API key", "کلید API", required=False,
                    help="پنل نوبیتکس ← کلیدهای API. فقط دسترسی READ و TRADE بدهید، هرگز WITHDRAW، و کلید را به "
                         "IP همین سرور محدود کنید."),
         Credential("nobitex_private_key", "Private key", "کلید خصوصی", required=False,
@@ -204,7 +205,7 @@ class NobitexClient(HttpVenue):
         body: dict[str, Any] = {"type": side.lower(), "execution": type.lower(), "srcCurrency": src,
                                 "dstCurrency": dst, "amount": quantity}
         if price is not None:
-            body["price"] = fmt_dec(float(price) * 10) if dst == "rls" else price
+            body["price"] = fmt_dec(Decimal(price) * 10) if dst == "rls" else price
         body["clientOrderId"] = client_id or uuid.uuid4().hex[:32]
         data = await self._call("POST", "/market/orders/add", body=body, auth=True)
         return self._order(data["order"], symbol.upper())

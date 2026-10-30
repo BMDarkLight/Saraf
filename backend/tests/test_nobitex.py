@@ -113,3 +113,15 @@ async def test_candles_map_resolution():
     assert bars[0]["o"] == 21174747834.0   # candles are already in toman
     with pytest.raises(VenueError):
         await c.candles("BTCTMN", "7", 0, 100)
+
+
+async def test_rial_price_has_no_float_noise():
+    seen = []
+
+    def add(req):
+        b = json.loads(req.content)
+        return {"status": "ok", "order": {"id": 1, "type": "buy", "market": "SHIB-RLS", "price": b["price"],
+                                          "amount": b["amount"], "matchedAmount": "0", "status": "Active"}}
+    c = client({("POST", "/market/orders/add"): add}, seen, token="tok")
+    await c.place_order("SHIBTMN", "BUY", "LIMIT", "1000", price="0.57")
+    assert json.loads(seen[-1].content)["price"] == "5.7"

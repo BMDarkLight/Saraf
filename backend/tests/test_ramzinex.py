@@ -116,3 +116,55 @@ async def test_error_status_raises():
              api_key="k", secret="s")
     with pytest.raises(VenueError, match="low balance"):
         await c.place_order("BTCTMN", "BUY", "LIMIT", "0.01", price="100000")
+
+
+async def test_order_body_has_no_exponent_or_float_noise():
+    seen = []
+    c = make({("POST", "/exchange/api/v1.0/exchange/users/me/orders/limit"): {"status": 0, "data": {"order_id": 1}}},
+             seen, api_key="k", secret="s")
+    await c.place_order("BTCTMN", "BUY", "LIMIT", "0.00001", price="0.7")
+    raw = seen[-1].content.decode()
+    assert "e-" not in raw and json.loads(raw) == {"pair_id": 2, "amount": 0.00001, "price": 7, "type": "buy"}
+    assert '"price": 7,' in raw or '"price":7' in raw
+
+
+async def test_market_buy_spends_at_most_the_quote_amount():
+    seen = []
+    routes = {("POST", "/exchange/api/v2.0/exchange/users/me/orders/market"): {"status": 0, "data": {"order_id": 5}}}
+    c = make(routes, seen, api_key="k", secret="s")
+    await c.place_order("BTCTMN", "BUY", "MARKET", "", quote_amount="123456.78")
+    body = json.loads(seen[-1].content)
+    assert body["amount"] == 1234567   # rial, rounded down: never more than asked
+
+
+async def test_generic_broker_passes_quote_amount_to_ramzinex(tmp_path):
+    seen = []
+    routes = {("POST", "/exchange/api/v2.0/exchange/users/me/orders/market"): {"status": 0, "data": {"order_id": 5}}}
+    c = make(routes, seen, api_key="k", secret="s")
+    await c.live_spot_broker().place_order("BTCTMN", "BUY", "MARKET", quote_amount=500_000)
+    assert json.loads(seen[-1].content)["amount"] == 5_000_000
+
+
+async def test_token_renewed_once_on_401():
+    calls = {"n": 0}
+
+    def funds(req):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(401, json={"status": -1, "message": "expired"})
+        return {"status": 0, "data": []}
+    c = make({("GET", "/exchange/api/v1.0/exchange/users/me/funds/summaryDesktop"): funds}, api_key="k", secret="s")
+    assert await c.balances() == {}
+    assert calls["n"] == 2
+    c2 = make({("GET", "/exchange/api/v1.0/exchange/users/me/funds/summaryDesktop"):
+               httpx.Response(401, json={"status": -1, "message": "bad key"})}, api_key="k", secret="s")
+    with pytest.raises(VenueError, match="bad key"):
+        await c2.balances()
+
+
+async def test_placed_order_is_reported_even_if_its_id_cannot_be_saved(tmp_path):
+    (tmp_path / "venues" / "ramzinex-orders.json").mkdir(parents=True)   # a directory: writing it fails
+    c = make({("POST", "/exchange/api/v1.0/exchange/users/me/orders/limit"): {"status": 0, "data": {"order_id": 42}}},
+             api_key="k", secret="s", data_dir=tmp_path)
+    o = await c.place_order("BTCTMN", "BUY", "LIMIT", "0.01", price="100000", client_id="mine")
+    assert o["clientOrderId"] == "42" and o["status"] == "NEW"

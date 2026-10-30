@@ -44,6 +44,8 @@ def requested_engine_mode() -> str:
     return "live" if "--mode live" in args else "shadow"
 
 
+# the default venue picked in the settings screen (get_settings leaves it out so the engine keeps its own)
+settings.default_venue = connections.load(settings.data_dir).get("default_venue", settings.default_venue)
 # One mode for the whole app: when the engine trades for real, so do the chat assistant's spot trades
 settings.spot_mode = "paper"
 ctx = AppContext.build(settings)
@@ -286,10 +288,16 @@ async def set_default_venue(body: DefaultIn):
         raise HTTPException(400, f"unknown venue {name!r}")
     if name == ctx.venue.name:
         return {"default": name}
+    v = ctx.venues.get(name)
+    if not v.capabilities.order_book:
+        raise HTTPException(400, f"{v.title} has prices only; the default venue needs an order book for paper fills")
+    if ctx.settings.spot_mode == "live" and not (v.has_key and v.capabilities.trading):
+        raise HTTPException(400, f"orders are real right now and {v.title} has no trading key; add one first "
+                                 "or switch the app to paper")
     _needs_live_confirm(body.confirm)
     connections.save(ctx.settings.data_dir, {"default_venue": name})
     ctx.settings.default_venue = name
-    await _rebuild_default(ctx.venues.get(name))
+    await _rebuild_default(v)
     return {"default": name, "spot_mode": ctx.settings.spot_mode}
 
 

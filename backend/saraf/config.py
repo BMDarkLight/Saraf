@@ -158,5 +158,5 @@ def get_settings() -> Settings:
     s.data_dir.mkdir(parents=True, exist_ok=True)
     # values saved from the settings screen win over the environment
     from . import connections
-    connections.apply(s, connections.load(s.data_dir))
+    connections.overlay(s)
     return s

@@ -74,6 +74,13 @@ def apply(settings: Any, values: dict[str, str]) -> None:
             setattr(settings, k, v)
 
 
+def overlay(settings: Any) -> None:
+    """Lay the saved values over a Settings built from the environment. The default venue is left out: the
+    engine reads these settings too and must keep the venue its state was built on, so only the server applies
+    it (to the chat, the dashboard and the alerts)."""
+    apply(settings, {k: v for k, v in load(settings.data_dir).items() if k != "default_venue"})
+
+
 def sync(settings: Any, keys: Any, saved: dict[str, str]) -> None:
     """Make `keys` on a live Settings match the store: saved values win, removed ones go back to the env's."""
     base = _baseline.get(id(settings), {})

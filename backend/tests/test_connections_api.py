@@ -35,7 +35,7 @@ async def test_listing_has_no_secret_values(api):
     fields = {f["key"]: f for f in bitpin["fields"]}
     assert fields["bitpin_secret_key"] == {**fields["bitpin_secret_key"], "set": True, "source": "saved",
                                            "hint": "••••e-42"}
-    assert fields["bitpin_api_key"]["hint"] == "pubkey-1"   # not a secret
+    assert fields["bitpin_api_key"]["hint"] == "••••ey-1"   # API keys are masked too
     assert bitpin["has_key"] and listing["default"] == "wallex"
     assert api.ctx.settings.bitpin_secret_key == "very-secret-value-42"
 
@@ -58,6 +58,7 @@ async def test_put_rejects_foreign_keys(api):
 
 async def test_live_default_change_needs_confirm(api):
     api.ctx.settings.spot_mode = "live"
+    api.ctx.settings.nobitex_token = "tok"
     r = await api.post("/api/connections/default", json={"venue": "nobitex"})
     assert r.status_code == 400 and "LIVE" in r.text
     r = await api.put("/api/connections/wallex", json={"values": {"wallex_api_key": "k"}})
@@ -67,13 +68,13 @@ async def test_live_default_change_needs_confirm(api):
 async def test_default_switch_rebuilds_paper_broker_and_keeps_balances_apart(api):
     spot = api.ctx.spot
     await spot.place_order("BTCUSDT", "BUY", "MARKET", quantity=1)
-    r = await api.post("/api/connections/default", json={"venue": "tetherland"})
+    r = await api.post("/api/connections/default", json={"venue": "binance"})
     assert r.status_code == 200, r.text
     ctx = api.ctx
-    assert ctx.venue.name == "tetherland" and isinstance(ctx.spot, PaperSpotBroker) and ctx.spot is not spot
-    assert ctx.settings.default_venue == "tetherland"
+    assert ctx.venue.name == "binance" and isinstance(ctx.spot, PaperSpotBroker) and ctx.spot is not spot
+    assert ctx.settings.default_venue == "binance"
     assert "BTC" not in await ctx.spot.balances()   # the old venue's paper fills stay with it
-    assert connections.load(ctx.settings.data_dir)["default_venue"] == "tetherland"
+    assert connections.load(ctx.settings.data_dir)["default_venue"] == "binance"
     r = await api.post("/api/connections/default", json={"venue": "nope"})
     assert r.status_code == 400
 

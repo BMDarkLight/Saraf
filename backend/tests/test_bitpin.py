@@ -113,3 +113,13 @@ async def test_candle_resolution_mismatch_raises():
                                                   "ts": 100.0, "resolution": "30m"}]})
     with pytest.raises(VenueError, match="resolution"):
         await c.candles("BTCTMN", "60", 0, 200)
+
+
+async def test_get_order_ignores_a_list_row_for_another_identifier():
+    auth = {"access": jwt(time.time() + 900), "refresh": "r"}
+    other = {"id": 8, "symbol": "BTC_IRT", "identifier": "someone-else", "state": "closed", "base_amount": "1",
+             "dealed_base_amount": "1", "dealed_quote_amount": "5"}
+    c = make({("POST", "/api/v1/usr/authenticate/"): auth, ("GET", "/api/v1/odr/orders/"): [other]},
+             api_key="k", secret_key="s")
+    with pytest.raises(VenueError, match="no order"):
+        await c.get_order("mine")

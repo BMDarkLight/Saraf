@@ -49,6 +49,7 @@ class PendingAction:
     status: str = "pending"  # pending | executing | executed | rejected | failed | expired
     result: Any = None
     mode: str = "paper"      # paper | live: what the card shows, and what approval will execute in
+    venue: str = ""          # the default venue when the card was made; approval runs only on that venue
 
     def public(self) -> dict:
         return {"id": self.id, "tool": self.tool, "args": self.args, "summary": self.summary,
@@ -216,7 +217,7 @@ class Agent:
                 action = PendingAction(
                     id=uuid.uuid4().hex[:12], session_id=session.id, tool=name, args=args.model_dump(),
                     summary=summary, reason=getattr(args, "reason", None), risk=_jsonable(facts),
-                    mode=self._mode(name),
+                    mode=self._mode(name), venue=self.ctx.venue.name,
                 )
                 self.pending[action.id] = action
                 return True, {"status": "awaiting_user_confirmation", "action_id": action.id,
@@ -250,6 +251,11 @@ class Agent:
         if self._mode(action.tool) != action.mode:   # switched test <-> real after the card was shown
             action.status = "failed"
             action.result = {"error": "حالت معامله (آزمایشی/واقعی) بعد از ساخت این کارت عوض شده؛ دوباره درخواست بدهید."}
+            return action
+        if action.venue and action.venue != self.ctx.venue.name:
+            action.status = "failed"
+            action.result = {"error": f"صرافی پیش‌فرض بعد از ساخت این کارت عوض شده ({action.venue} ← "
+                                      f"{self.ctx.venue.name})؛ دوباره درخواست بدهید."}
             return action
         action.status = "executing"  # claimed synchronously, before any await
         t = TOOLS[action.tool]

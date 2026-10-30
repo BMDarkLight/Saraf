@@ -14,13 +14,14 @@ from __future__ import annotations
 import json
 import time
 import uuid
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import httpx
 
 from ..base import Capabilities, Credential, Order, VenueError
-from ..http import HttpVenue, jwt_exp, rial_to_toman
+from ..http import HttpVenue, jwt_exp, plain_json, rial_to_toman, round_down_dec
 
 PUBLIC = "https://publicapi.ramzinex.ir/exchange/api"
 PRIVATE = "https://api.ramzinex.ir/exchange/api"
@@ -45,8 +46,9 @@ class RamzinexClient(HttpVenue):
     title = "Ramzinex"
     title_fa = "رمزینکس"
     capabilities = Capabilities(asset_class="crypto", candles=RESOLUTIONS, trading=True, account=True)
+    market_buy_in_quote = True   # brokers pass quote_amount through instead of converting it to a quantity
     credentials = (
-        Credential("ramzinex_api_key", "API key", "کلید API", secret=False,
+        Credential("ramzinex_api_key", "API key", "کلید API",
                    help="رمزینکس ← مدیریت API. فقط دسترسی خواندن و معامله بدهید، نه برداشت."),
         Credential("ramzinex_secret", "Secret", "کلید مخفی"),
     )
@@ -67,9 +69,10 @@ class RamzinexClient(HttpVenue):
     def _load_ids(self) -> dict[str, int]:
         if self._ids_path and self._ids_path.exists():
             try:
-                return json.loads(self._ids_path.read_text())
-            except ValueError:
+                data = json.loads(self._ids_path.read_text())
+            except (OSError, ValueError):
                 return {}
+            return data if isinstance(data, dict) else {}
         return {}
 
     def _remember(self, client_id: str, order_id: int) -> None:
@@ -110,8 +113,11 @@ class RamzinexClient(HttpVenue):
         for attempt in (0, 1):
             if not self._token or self._token_exp < time.time() + 30:
                 await self._login()
-            r = await self._send(method, path, json=body,
-                                 headers={"Authorization2": f"Bearer {self._token}", "x-api-key": self.api_key})
+            headers = {"Authorization2": f"Bearer {self._token}", "x-api-key": self.api_key}
+            if body is not None:
+                headers["Content-Type"] = "application/json"
+            r = await self._send(method, path, content=plain_json(body) if body is not None else None,
+                                 headers=headers)
             if r.status_code == 401 and attempt == 0:
                 self._token = ""
                 continue
@@ -240,33 +246,42 @@ class RamzinexClient(HttpVenue):
         raise VenueError(f"Ramzinex: no order {order_id!r}")
 
     async def place_order(self, symbol: str, side: str, type: str, quantity: str, price: str | None = None,
-                          client_id: str | None = None) -> dict:
+                          client_id: str | None = None, quote_amount: str | None = None) -> dict:
         p = await self._pair(symbol)
-        rial, side, qty = self._rial(p), side.lower(), float(quantity)
+        rial, side = self._rial(p), side.lower()
+        to_venue = Decimal(10) if rial else Decimal(1)
+        quote_decimals = 0 if rial else int(p.get("quote_precision") or 2)
+        qty = Decimal(quantity) if quantity else Decimal(0)
         if type.upper() == "MARKET":
             amount = qty
             if side == "buy":   # Ramzinex sizes a market buy in the quote currency
-                book = await self.depth(symbol)
-                asks = [float(lv["price"]) for lv in book["ask"] if lv["price"]]
-                if not asks:
-                    raise VenueError(f"Ramzinex: {symbol} has no asks to price a market buy")
-                amount = qty * min(asks) * (10 if rial else 1)
+                if quote_amount is not None:
+                    spend = Decimal(quote_amount)
+                else:
+                    book = await self.depth(symbol)
+                    asks = [Decimal(str(lv["price"])) for lv in book["ask"] if lv["price"]]
+                    if not asks:
+                        raise VenueError(f"Ramzinex: {symbol} has no asks to price a market buy")
+                    spend = qty * min(asks)
+                amount = round_down_dec(spend * to_venue, quote_decimals)
             path, body = "/v2.0/exchange/users/me/orders/market", {"pair_id": p["pair_id"], "amount": amount,
                                                                    "type": side}
         else:
             if price is None:
                 raise VenueError("Ramzinex: LIMIT orders need a price")
-            pr = float(price) * (10 if rial else 1)
             path = f"{V1}/users/me/orders/limit"
-            body = {"pair_id": p["pair_id"], "amount": qty, "price": int(pr) if pr == int(pr) else pr, "type": side}
+            body = {"pair_id": p["pair_id"], "amount": qty, "price": Decimal(price) * to_venue, "type": side}
         data = (await self._private("POST", path, body)).get("data") or {}
         order_id = data.get("order_id")
         if order_id is None:
             raise VenueError("Ramzinex: the order was accepted but no order id came back", payload=data)
         client_id = client_id or uuid.uuid4().hex
-        self._remember(client_id, int(order_id))
+        try:
+            self._remember(client_id, int(order_id))
+        except OSError:   # the order is placed; it stays findable by its Ramzinex id
+            client_id = str(order_id)
         return {"clientOrderId": client_id, "symbol": symbol.upper(), "side": side.upper(), "type": type.upper(),
-                "price": float(price or 0), "origQty": qty, "executedQty": 0.0, "executedSum": 0.0,
+                "price": float(price or 0), "origQty": float(qty), "executedQty": 0.0, "executedSum": 0.0,
                 "executedPrice": 0.0, "status": "NEW", "active": True, "venueOrderId": order_id}
 
     async def get_order(self, order_id: str) -> dict:

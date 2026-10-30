@@ -37,6 +37,15 @@ class VenueSpotBroker(SpotBroker):
         info = await self.info.quote(symbol)
         if type == "LIMIT" and price is None:
             raise BrokerError("LIMIT orders need a price")
+        if (side == "BUY" and type == "MARKET" and quantity is None and quote_amount is not None
+                and getattr(self.venue, "market_buy_in_quote", False)):
+            # the venue sizes market buys in the quote currency: hand it the amount rather than a quantity
+            # priced at a possibly stale ask, which could spend more than asked
+            try:
+                return await self.venue.place_order(info["symbol"], side, type, "",
+                                                    quote_amount=fmt_num(quote_amount, info["price_decimals"]))
+            except VenueError as e:
+                raise self._wrap(e)
         qty = await _resolve_quantity(info, side, quantity, quote_amount, price)
         try:
             return await self.venue.place_order(
