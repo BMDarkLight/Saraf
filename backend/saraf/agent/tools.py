@@ -266,9 +266,10 @@ async def spot_balances(ctx: AppContext, a: NoArgs):
     return {"mode": ctx.spot.mode, **await value_balances(ctx, await ctx.spot.balances())}
 
 
-async def value_balances(ctx: AppContext, bals: dict) -> dict:
-    """Adds value_usdt to each balance and totals in USDT and TMN (at last prices)."""
-    markets = await ctx.venue.markets()
+async def value_balances(ctx: AppContext, bals: dict, venue=None) -> dict:
+    """Adds value_usdt to each balance and totals in USDT and TMN (at last prices on `venue`, default the
+    default venue)."""
+    markets = await (venue or ctx.venue).markets()
 
     def px(asset: str, quote: str) -> float:
         if asset == quote:

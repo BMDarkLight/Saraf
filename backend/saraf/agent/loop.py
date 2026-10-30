@@ -173,6 +173,11 @@ class Agent:
         self.pending: dict[str, PendingAction] = {}
         self.store = SessionStore(ctx.settings.data_dir)
 
+    def reset_llm(self) -> None:
+        """Rebuild the LLM client after its endpoint or key changed in the settings."""
+        s = self.ctx.settings
+        self.llm = AsyncOpenAI(base_url=s.llm_base_url, api_key=s.llm_api_key or "missing")
+
     def session(self, session_id: str | None) -> Session:
         sid = session_id or uuid.uuid4().hex
         if sid not in self.sessions:   # a saved conversation reopened after a restart keeps its context

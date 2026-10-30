@@ -62,10 +62,25 @@ def save(data_dir: Path, changes: dict[str, str | None]) -> dict[str, str]:
     return data
 
 
+# id(settings) -> what each overlaid field held before (the environment's value), to fall back to on removal
+_baseline: dict[int, dict[str, Any]] = {}
+
+
 def apply(settings: Any, values: dict[str, str]) -> None:
+    base = _baseline.setdefault(id(settings), {})
     for k, v in values.items():
         if k in type(settings).model_fields:
+            base.setdefault(k, getattr(settings, k))
             setattr(settings, k, v)
+
+
+def sync(settings: Any, keys: Any, saved: dict[str, str]) -> None:
+    """Make `keys` on a live Settings match the store: saved values win, removed ones go back to the env's."""
+    base = _baseline.get(id(settings), {})
+    apply(settings, {k: saved[k] for k in keys if k in saved})
+    for k in keys:
+        if k not in saved and k in base:
+            setattr(settings, k, base[k])
 
 
 def field_status(settings: Any, saved: dict[str, str], key: str, secret: bool) -> dict:

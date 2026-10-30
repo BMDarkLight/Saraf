@@ -126,8 +126,17 @@ class FuturesBroker(ABC):
 
 
 def state_path(settings, venue: Venue, kind: str) -> Path:
-    """A paper broker's state file. The default venue keeps the plain name (existing data dirs resume as before)."""
-    suffix = "" if venue.name == settings.default_venue else f"-{venue.name}"
+    """A paper broker's state file. The plain name belongs to the venue that was the default when the data dir
+    was first used (existing data dirs resume as before); every other venue gets its own file, so changing the
+    default venue later never hands one venue's paper balances to another."""
+    owner_file = settings.data_dir / "paper-venue.txt"
+    try:
+        owner = owner_file.read_text().strip()
+    except OSError:
+        owner = settings.default_venue
+        settings.data_dir.mkdir(parents=True, exist_ok=True)
+        owner_file.write_text(owner)
+    suffix = "" if venue.name == owner else f"-{venue.name}"
     return settings.data_dir / f"{kind}{suffix}.json"
 
 

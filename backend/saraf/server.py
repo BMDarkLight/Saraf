@@ -27,8 +27,9 @@ from .brokers import BrokerError, PaperFuturesBroker, PaperSpotBroker
 from .config import ROOT, get_settings
 from .market import analytics, sentiment
 from .news import web
-from . import personas as persona_mod, strategy_chat, traders as traders_mod, tuning
-from .venues import Venue, VenueError
+from . import connections, personas as persona_mod, strategy_chat, traders as traders_mod, tuning
+from .alerts import AlertStore
+from .venues import Venue, VenueError, registry as venue_registry
 
 settings = get_settings()
 ENGINE_MODE_FILE = ROOT / "data" / "engine" / "mode.env"
@@ -194,6 +195,136 @@ async def config():
             "venue": ctx.venue.name, "has_venue_key": ctx.venue.has_key, "llm_configured": bool(settings.llm_api_key),
             "max_leverage": settings.max_leverage, "tools": sorted(agent_tools.TOOLS),
             "engine_mode": (engine_status() or {}).get("mode") or requested_engine_mode()}
+
+
+# --------------------------------------------------------------- settings: connections and the chat model
+class ValuesIn(BaseModel):
+    values: dict[str, str | None] = {}
+    confirm: str = ""
+
+
+class DefaultIn(BaseModel):
+    venue: str
+    confirm: str = ""
+
+
+def _needs_live_confirm(confirm: str) -> None:
+    if ctx.settings.spot_mode == "live" and confirm != "LIVE":
+        raise HTTPException(400, "orders on this venue are real right now: this change needs confirm=LIVE")
+
+
+def _connection(name: str) -> dict:
+    s, saved = ctx.settings, connections.load(ctx.settings.data_dir)
+    v = ctx.venue if name == ctx.venue.name else ctx.venues.get(name)
+    fields = [{"key": c.key, "label": c.label, "label_fa": c.label_fa, "secret": c.secret, "required": c.required,
+               "help": c.help, **connections.field_status(s, saved, c.key, c.secret)}
+              for c in venue_registry.credentials_of(name)]
+    return {**v.describe(), "fields": fields, "default": name == ctx.venue.name}
+
+
+def _known_venue(name: str) -> str:
+    name = name.lower()
+    if name not in venue_registry.available():
+        raise HTTPException(404, f"unknown venue {name!r}")
+    return name
+
+
+async def _rebuild_default(venue: Venue) -> None:
+    """Point the brokers, alerts and dashboard at `venue` (the new default, or the default after a key change)."""
+    s = ctx.settings
+    ctx.venue = venue
+    ctx.venues.default_name = venue.name
+    live = s.spot_mode == "live" and venue.has_key and venue.capabilities.trading
+    if s.spot_mode == "live" and not live:
+        s.spot_mode = "paper"   # the new venue cannot trade for real: fall back to paper rather than fail later
+    ctx.spot = venue.live_spot_broker() if live else PaperSpotBroker(venue, s)
+    if s.futures_mode == "paper":
+        ctx.futures = PaperFuturesBroker(venue, s)
+    ctx.alerts = AlertStore(venue, s.data_dir)
+    _key_check.update(at=0.0, warning=None)
+
+
+@app.get("/api/connections")
+async def list_connections():
+    return {"default": ctx.venue.name, "live": ctx.settings.spot_mode == "live",
+            "venues": [_connection(n) for n in venue_registry.available()]}
+
+
+@app.put("/api/connections/{name}")
+async def save_connection(name: str, body: ValuesIn):
+    name = _known_venue(name)
+    allowed = {c.key for c in venue_registry.credentials_of(name)}
+    if bad := sorted(set(body.values) - allowed):
+        raise HTTPException(400, f"{name} has no setting {', '.join(bad)}")
+    if name == ctx.venue.name:
+        _needs_live_confirm(body.confirm)
+    connections.sync(ctx.settings, allowed, connections.save(ctx.settings.data_dir, body.values))
+    v = await ctx.venues.reload(name)
+    if name == ctx.venue.name:
+        await _rebuild_default(v)
+    return _connection(name)
+
+
+@app.delete("/api/connections/{name}")
+async def remove_connection(name: str, confirm: str = ""):
+    name = _known_venue(name)
+    keys = [c.key for c in venue_registry.credentials_of(name)]
+    return await save_connection(name, ValuesIn(values={k: None for k in keys}, confirm=confirm))
+
+
+@app.post("/api/connections/{name}/test")
+async def test_connection(name: str):
+    name = _known_venue(name)
+    v = ctx.venue if name == ctx.venue.name else ctx.venues.get(name)
+    return await v.test_connection()
+
+
+@app.post("/api/connections/default")
+async def set_default_venue(body: DefaultIn):
+    name = body.venue.lower()
+    if name not in venue_registry.available():
+        raise HTTPException(400, f"unknown venue {name!r}")
+    if name == ctx.venue.name:
+        return {"default": name}
+    _needs_live_confirm(body.confirm)
+    connections.save(ctx.settings.data_dir, {"default_venue": name})
+    ctx.settings.default_venue = name
+    await _rebuild_default(ctx.venues.get(name))
+    return {"default": name, "spot_mode": ctx.settings.spot_mode}
+
+
+def _llm_view() -> dict:
+    s, saved = ctx.settings, connections.load(ctx.settings.data_dir)
+    labels = {"llm_base_url": ("Endpoint", "آدرس سرویس"), "llm_api_key": ("API key", "کلید API"),
+              "llm_model": ("Model", "مدل")}
+    return {"fields": [{"key": k, "label": labels[k][0], "label_fa": labels[k][1], "secret": k in connections.SECRET_LLM,
+                        **connections.field_status(s, saved, k, k in connections.SECRET_LLM)}
+                       for k in connections.LLM_KEYS]}
+
+
+@app.get("/api/settings/llm")
+async def get_llm_settings():
+    return _llm_view()
+
+
+@app.put("/api/settings/llm")
+async def save_llm_settings(body: ValuesIn):
+    if bad := sorted(set(body.values) - set(connections.LLM_KEYS)):
+        raise HTTPException(400, f"not a model setting: {', '.join(bad)}")
+    connections.sync(ctx.settings, connections.LLM_KEYS, connections.save(ctx.settings.data_dir, body.values))
+    agent.reset_llm()
+    return _llm_view()
+
+
+@app.post("/api/settings/llm/test")
+async def test_llm_settings():
+    s = ctx.settings
+    try:
+        r = await agent.llm.chat.completions.create(model=s.llm_model, max_tokens=5,
+                                                    messages=[{"role": "user", "content": "Reply with: ok"}])
+        return {"ok": True, "model": s.llm_model, "message": (r.choices[0].message.content or "").strip()[:80]}
+    except Exception as e:   # the provider's own error text is what the user needs to see
+        return {"ok": False, "model": s.llm_model, "message": str(e)[:300]}
 
 
 # --------------------------------------------------------------- dashboard
@@ -496,8 +627,18 @@ async def check_trading_key() -> str | None:
 
 
 @app.get("/api/account")
-async def account():
-    """The real account on the default venue (read-only), plus the engine."""
+async def account(venue: str | None = None):
+    """The real account on the default venue (read-only), plus the engine. `venue` reads another connected
+    venue's balances instead (without the engine)."""
+    if venue and venue.lower() != ctx.venue.name:
+        v = pick_venue(venue)
+        other: dict = {"venue": v.name, "has_key": v.has_key}
+        if v.has_key and v.capabilities.account:
+            try:
+                other["spot"] = await agent_tools.value_balances(ctx, await v.live_spot_broker().balances(), v)
+            except (VenueError, BrokerError) as e:
+                other["error"] = str(e)
+        return other
     out: dict = {"venue": ctx.venue.name, "has_key": ctx.venue.has_key,
                  "sub_account": bool(getattr(ctx.venue, "sub_account", ""))}
     if warning := await check_trading_key():
