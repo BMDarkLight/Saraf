@@ -1062,3 +1062,38 @@ input[type="range"], .num-ctl input[type="range"] { accent-color: var(--text); }
   .btn, .send { transition: none; }
   .btn.primary:hover, .btn.danger:hover, .send:not(:disabled):hover { transform: none; }
 }
+
+/* ----------------------------------------------------------------- settings */
+.conn { display: grid; gap: 14px; padding-bottom: 48px; }
+.conn-intro { margin: 0; line-height: 1.9; }
+.conn-intro code { font-size: 11.5px; background: var(--surface-2); padding: 1px 6px; border-radius: 4px; }
+.conn-group { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+.conn-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; align-items: start; }
+.conn-card { display: grid; gap: 4px; }
+.conn-card.is-default { border-color: var(--blue); }
+.conn-h { display: flex; align-items: flex-start; gap: 10px; justify-content: space-between; margin-bottom: 4px; }
+.conn-caps { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.cap { font-size: 10.5px; border: 1px solid var(--border-soft); color: var(--muted); border-radius: 999px; padding: 0 7px; }
+.cap.cls { background: var(--surface-2); color: var(--text); border-color: transparent; }
+.conn-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; white-space: nowrap; color: var(--muted); }
+.conn-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
+.conn-status.ok .dot { background: var(--up); }
+.conn-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 8px; }
+.conn-card .err-box.conn-err, .model-panel .err-box.conn-err { margin: 6px 0 0; }
+.conn-ok { margin-top: 6px; font-size: 12px; unicode-bidi: plaintext; }
+.tag.ok { background: var(--up-soft); color: var(--up); }
+.text-in {
+  width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; background: var(--surface);
+  color: var(--text); outline: none; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+}
+.text-in:focus { border-color: var(--blue); }
+.text-in::placeholder { color: var(--muted); font-family: inherit; }
+.model-panel { max-width: 640px; display: grid; gap: 4px; }
+.model-panel p { margin: 4px 0; }
+.wallet-pick {
+  margin-inline-start: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface);
+  padding: 1px 6px; font-size: 12px;
+}
+@media (max-width: 820px) {
+  .conn-grid { grid-template-columns: 1fr; }
+}

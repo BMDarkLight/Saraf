@@ -8,9 +8,10 @@ import { Markets } from "./components/Markets";
 import { OrderBook } from "./components/OrderBook";
 import { Portfolio } from "./components/Portfolio";
 import { PriceChart } from "./components/PriceChart";
+import { SettingsPage } from "./components/settings/SettingsPage";
 import { StrategyPage, type StrategyTab } from "./components/strategy/StrategyPage";
 
-type Tab = "markets" | "chat" | "trade" | "strategy";
+type Tab = "markets" | "chat" | "trade" | "strategy" | "settings";
 
 const icon = (d: string) => (
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -22,6 +23,7 @@ const TAB_ICONS: Record<Tab, React.ReactNode> = {
   chat: icon("M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"),
   trade: icon("M4 19V5m0 14h16M8 15l4-5 3 3 5-6"),
   strategy: icon("M12 3v3m0 12v3M3 12h3m12 0h3M7 7l2 2m6 6 2 2M7 17l2-2m6-6 2-2M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z"),
+  settings: icon("M4 7h10m4 0h2M4 17h4m4 0h8M14 5v4M8 15v4"),
 };
 
 function initialTheme(): string {
@@ -108,6 +110,7 @@ export default function App() {
           <button className={tab === "chat" || tab === "trade" ? "on" : ""} onClick={() => setTab("chat")}>معامله</button>
           <button className={tab === "markets" ? "on" : ""} onClick={() => setTab("markets")}>بازار</button>
           <button className={tab === "strategy" ? "on" : ""} onClick={() => setTab("strategy")}>استراتژی</button>
+          <button className={tab === "settings" ? "on" : ""} onClick={() => setTab("settings")}>تنظیمات</button>
         </nav>
         <span className="spacer" />
         {cfg && (
@@ -125,12 +128,18 @@ export default function App() {
       </header>
       {cfg && !cfg.llm_configured && (
         <div className="warn-line" style={{ borderRadius: 0, textAlign: "center" }}>
-          کلید LLM تنظیم نشده — LLM_API_KEY و LLM_BASE_URL را در فایل ‎.env‎ قرار دهید.
+          کلید مدل هوش مصنوعی تنظیم نشده است.{" "}
+          <button className="link-btn" onClick={() => setTab("settings")}>تنظیمات ← مدل هوش مصنوعی</button>
         </div>
       )}
       {tab === "strategy" && (
         <main className="spage-wrap">
           <StrategyPage onModeChanged={reloadCfg} tab={sTab} setTab={setSTab} />
+        </main>
+      )}
+      {tab === "settings" && (
+        <main className="spage-wrap">
+          <SettingsPage onChanged={reloadCfg} />
         </main>
       )}
       {/* both views stay mounted (a reply streaming in the chat survives a look at the market); one is hidden */}
@@ -162,7 +171,7 @@ export default function App() {
       </main>
       <AlertToasts onAsk={ask} />
       <nav className="mobile-tabs">
-        {([["markets", "بازار"], ["chat", "ایجنت"], ["trade", "دارایی"], ["strategy", "استراتژی"]] as const).map(([k, l]) => (
+        {([["markets", "بازار"], ["chat", "ایجنت"], ["trade", "دارایی"], ["strategy", "استراتژی"], ["settings", "تنظیمات"]] as const).map(([k, l]) => (
           <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)} aria-current={tab === k ? "page" : undefined}>
             {TAB_ICONS[k]}
             {l}

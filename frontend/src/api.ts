@@ -52,3 +52,13 @@ export async function streamSSE(url: string, body: unknown, onEvent: (e: AgentEv
     }
   }
 }
+
+/** PUT/POST/DELETE with a JSON body; the server's `detail` becomes the error message. */
+export async function sendJSON<T = any>(method: "PUT" | "POST" | "DELETE", url: string, body?: unknown): Promise<T> {
+  const r = await fetch(url, {
+    method, headers: { "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.detail ?? `HTTP ${r.status}`);
+  return data;
+}

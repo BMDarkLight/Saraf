@@ -66,7 +66,7 @@ class BitpinClient(HttpVenue):
     capabilities = Capabilities(asset_class="crypto", candles=tuple(RESOLUTIONS), trading=True, account=True)
     credentials = (
         Credential("bitpin_api_key", "API key", "کلید API", secret=False,
-                   help="Bitpin > Profile > API. Bitpin binds the key to an IP list: add this server's IP."),
+                   help="بیت‌پین ← پروفایل ← API. کلید به فهرست IP بسته می‌شود؛ IP همین سرور را اضافه کنید."),
         Credential("bitpin_secret_key", "Secret key", "کلید مخفی"),
     )
 

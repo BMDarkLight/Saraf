@@ -55,12 +55,12 @@ class NobitexClient(HttpVenue):
     capabilities = Capabilities(asset_class="crypto", candles=tuple(RESOLUTIONS), trading=True, account=True)
     credentials = (
         Credential("nobitex_api_key", "API key", "کلید API", secret=False, required=False,
-                   help="Nobitex panel > API keys. Give it READ and TRADE only, never WITHDRAW, and lock it to "
-                        "this server's IP."),
+                   help="پنل نوبیتکس ← کلیدهای API. فقط دسترسی READ و TRADE بدهید، هرگز WITHDRAW، و کلید را به "
+                        "IP همین سرور محدود کنید."),
         Credential("nobitex_private_key", "Private key", "کلید خصوصی", required=False,
-                   help="Shown once when the key is created."),
+                   help="فقط یک بار، هنگام ساختن کلید، نمایش داده می‌شود."),
         Credential("nobitex_token", "Login token (instead of an API key)", "توکن ورود (به جای کلید API)",
-                   required=False, help="The older token from the panel's settings. Lasts 30 days."),
+                   required=False, help="توکن قدیمی از تنظیمات پنل؛ ۳۰ روز اعتبار دارد."),
     )
 
     def __init__(self, api_key: str = "", private_key: str = "", token: str = "", base_url: str = BASE_URL,

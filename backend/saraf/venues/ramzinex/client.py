@@ -47,7 +47,7 @@ class RamzinexClient(HttpVenue):
     capabilities = Capabilities(asset_class="crypto", candles=RESOLUTIONS, trading=True, account=True)
     credentials = (
         Credential("ramzinex_api_key", "API key", "کلید API", secret=False,
-                   help="ramzinex.com > API management. Give it read and trade only, not withdraw."),
+                   help="رمزینکس ← مدیریت API. فقط دسترسی خواندن و معامله بدهید، نه برداشت."),
         Credential("ramzinex_secret", "Secret", "کلید مخفی"),
     )
 

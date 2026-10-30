@@ -65,11 +65,11 @@ class WallexClient(Venue):
                                 futures=True, account=True)
     credentials = (
         Credential("wallex_api_key", "API key", "کلید API",
-                   help="Wallex > Account > API. Trading permission only, never withdrawal; lock it to this "
-                        "server's IP."),
+                   help="والکس ← حساب کاربری ← API. فقط دسترسی معامله، هرگز برداشت؛ کلید را به IP همین سرور "
+                        "محدود کنید."),
         Credential("wallex_sub_account_client_id", "Trade-credit sub-account", "زیرحساب اعتبار معاملاتی",
                    secret=False, required=False,
-                   help="The clientId of a trade-credit account (GET /sub-accounts). Empty = the main account."),
+                   help="clientId حساب اعتبار معاملاتی (از GET /sub-accounts). خالی = حساب اصلی."),
     )
 
     def __init__(self, base_url: str = "https://api.wallex.ir", api_key: str = "", timeout: float = 15.0,

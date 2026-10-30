@@ -153,9 +153,9 @@ class Venue(ABC):
                 bal = await self.balances()
                 held = sorted(a for a, b in bal.items() if float(b.get("value") or 0))
                 shown = ", ".join(held[:6]) + ("…" if len(held) > 6 else "")
-                return {"ok": True, "message": f"account reachable; holds {shown or 'nothing yet'}"}
+                return {"ok": True, "message": f"حساب در دسترس است؛ دارایی‌ها: {shown or 'هنوز چیزی نیست'}"}
             n = len(await self.markets())
-            return {"ok": True, "message": f"{n} markets"}
+            return {"ok": True, "message": f"{n} بازار در دسترس است"}
         except VenueError as e:
             return {"ok": False, "message": str(e)}
 

@@ -81,8 +81,8 @@ class NavasanClient(_RatesVenue):
     title = "Navasan"
     title_fa = "نوسان"
     credentials = (Credential("navasan_api_key", "API key", "کلید API",
-                              help="Free key from navasan.tech. The free plan allows a limited number of calls a "
-                                   "month, so Saraf caches the rates for 5 minutes."),)
+                              help="کلید رایگان از navasan.tech. طرح رایگان تعداد درخواست ماهانه محدودی دارد، برای "
+                                   "همین نرخ‌ها ۵ دقیقه نگه داشته می‌شوند."),)
 
     def __init__(self, api_key: str = "", transport: httpx.AsyncBaseTransport | None = None):
         super().__init__("https://api.navasan.tech", transport=transport)

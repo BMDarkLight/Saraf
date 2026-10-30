@@ -21,18 +21,27 @@ export function Portfolio({ refreshKey, assistantLive, onOpenStrategy }: {
   const [paper, setPaper] = useState<any>(null);
   const [strat, setStrat] = useState<any>(null);
   const [showPaper, setShowPaper] = useState(false);
+  // the wallet shown: the default venue (null) or another venue with a key
+  const [venue, setVenue] = useState<string | null>(null);
+  const [wallets, setWallets] = useState<{ name: string; title_fa: string; default: boolean }[]>([]);
+  const accountURL = venue ? `/api/account?venue=${venue}` : "/api/account";
+  useEffect(() => {
+    getJSON("/api/connections")
+      .then((x) => setWallets(x.venues.filter((v: any) => v.default || (v.has_key && v.account))))
+      .catch(() => {});
+  }, [refreshKey]);
   useEngineChanged(() => getJSON("/api/strategy").then(setStrat).catch(() => {}));
 
   useEffect(() => {
     let live = true;
     const load = () => {
-      getJSON("/api/account").then((x) => live && setAcc(x)).catch(() => {});
+      getJSON(accountURL).then((x) => live && setAcc(x)).catch(() => {});
       getJSON("/api/strategy").then((x) => live && setStrat(x)).catch(() => {});
     };
     load();
     const t = setInterval(load, 15000);
     return () => { live = false; clearInterval(t); };
-  }, [refreshKey]);
+  }, [refreshKey, accountURL]);
 
   useEffect(() => {
     if (!showPaper) return;
@@ -46,8 +55,15 @@ export function Portfolio({ refreshKey, assistantLive, onOpenStrategy }: {
   return (
     <>
       <AccountCard acc={acc} capital={strat?.engine?.capital_tmn ?? 5_000_000} live={strat?.mode === "live"}
+                   other={!!venue}
                    managed={(strat?.engine?.positions ?? []).map((p: any) => String(p.symbol).replace(/(USDT|TMN)$/, ""))}
-                   onChanged={() => getJSON("/api/account").then(setAcc).catch(() => {})} />
+                   onChanged={() => getJSON(accountURL).then(setAcc).catch(() => {})}
+                   picker={wallets.length > 1 && (
+                     <select className="wallet-pick" aria-label="کیف پول" value={venue ?? ""}
+                             onChange={(e) => { setAcc(null); setVenue(e.target.value || null); }}>
+                       {wallets.map((w) => <option key={w.name} value={w.default ? "" : w.name}>{w.title_fa}</option>)}
+                     </select>
+                   )} />
       <EngineCard d={strat} onOpen={onOpenStrategy} onChanged={() => getJSON("/api/strategy").then(setStrat).catch(() => {})} />
       {!assistantLive && (
         <button className="link-btn" onClick={() => setShowPaper(!showPaper)}>
@@ -59,8 +75,9 @@ export function Portfolio({ refreshKey, assistantLive, onOpenStrategy }: {
   );
 }
 
-function AccountCard({ acc, capital, live, managed, onChanged }: {
+function AccountCard({ acc, capital, live, managed, onChanged, picker, other }: {
   acc: any; capital: number; live: boolean; managed: string[]; onChanged: () => void;
+  picker?: React.ReactNode; other?: boolean;   // other: a venue the engine does not trade
 }) {
   const [move, setMove] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -81,7 +98,7 @@ function AccountCard({ acc, capital, live, managed, onChanged }: {
     .map(([asset, b]: any) => ({ asset, total: b.total, locked: b.locked, tmn: (b.value_usdt ?? 0) * k }))
     .filter((r) => r.tmn > 1)
     .sort((a, b) => b.tmn - a.tmn);
-  const ret = total != null && capital ? (100 * (total - capital)) / capital : null;
+  const ret = total != null && capital && !other ? (100 * (total - capital)) / capital : null;
   let pi = 0;
   const color = (a: string) => ASSET_COLOR[a] ?? PALETTE[pi++ % PALETTE.length];
   const colored = rows.map((r) => ({ ...r, color: color(r.asset) }));
@@ -89,11 +106,12 @@ function AccountCard({ acc, capital, live, managed, onChanged }: {
     <div className="card rail-card">
       <div className="card-h">
         حساب{acc.sub_account ? " اعتبار معاملاتی" : ""}
+        {picker}
         <span className="spacer" />
         {acc.has_key && <span className="tag-real">واقعی</span>}
       </div>
       <div className="card-b acct">
-        {!acc.has_key && <div className="muted">کلید API صرافی تنظیم نشده است.</div>}
+        {!acc.has_key && <div className="muted">کلید API صرافی تنظیم نشده است؛ از «تنظیمات ← اتصال‌ها» اضافه کنید.</div>}
         {acc.error && <div className="err-box">{acc.error}</div>}
         {acc.key_warning && <div className="err-box">{acc.key_warning}</div>}
         {total != null && (
@@ -124,7 +142,7 @@ function AccountCard({ acc, capital, live, managed, onChanged }: {
                     <span className="muted small num">{r.asset === "TMN" ? "" : `${compact(r.total)} ${r.asset}`}{r.locked ? " · قفل" : ""}</span>
                   </div>
                   <span className="hold-pct muted num">{total ? Math.round((100 * r.tmn) / total) : 0}%</span>
-                  {r.asset !== "TMN" && r.asset !== "USDT" && !managed.includes(r.asset) && (
+                  {!other && r.asset !== "TMN" && r.asset !== "USDT" && !managed.includes(r.asset) && (
                     <button className="btn ghost sm hold-move" title="فروش این رمزارز به تتر برای هسته استراتژی"
                             onClick={() => setMove(r.asset)}>به هسته تتری</button>
                   )}
