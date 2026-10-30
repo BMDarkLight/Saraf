@@ -48,6 +48,8 @@ class Settings(BaseSettings):
     # Ramzinex: API key and secret from API management
     ramzinex_api_key: str = ""
     ramzinex_secret: str = ""
+    # Navasan (free-market currency and gold rates): API key from navasan.tech
+    navasan_api_key: str = ""
 
     # Trading mode: "paper" simulates fills against the venue's live prices, "live" sends real orders.
     spot_mode: Literal["paper", "live"] = "paper"

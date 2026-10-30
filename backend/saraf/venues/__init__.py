@@ -3,6 +3,6 @@
 from .base import Capabilities, Credential, Order, Venue, VenueError, VenueUnsupported
 from .registry import Venues, available, create, register
 
-from . import bitpin, nobitex, ramzinex, tse, wallex  # noqa: E402,F401  (registers the venues)
+from . import binance, bitpin, nobitex, ramzinex, rates, tabdeal, tse, wallex  # noqa: E402,F401  (registers the venues)
 
 __all__ = ["Capabilities", "Credential", "Order", "Venue", "VenueError", "VenueUnsupported", "Venues", "available", "create", "register"]
