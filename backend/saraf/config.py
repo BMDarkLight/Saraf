@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     wallex_sub_account_client_id: str = ""
     # Futures endpoints are not in the public docs; plug them in here once known.
     wallex_futures_base_url: str = ""
+    # Nobitex: an API key with its Ed25519 private key, or a login token from the web panel
+    nobitex_api_key: str = ""
+    nobitex_private_key: str = ""
+    nobitex_token: str = ""
 
     # Trading mode: "paper" simulates fills against the venue's live prices, "live" sends real orders.
     spot_mode: Literal["paper", "live"] = "paper"
