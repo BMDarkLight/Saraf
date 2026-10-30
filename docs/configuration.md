@@ -3,6 +3,11 @@
 Settings come from environment variables, read from `.env` in the repository root or in `backend/`
 (`backend/saraf/config.py`). Names are case-insensitive. `.env.example` is a commented starting point.
 
+The venue keys, the default venue and the chat model (`LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`) can also be set in
+the app under **تنظیمات** (settings), without a restart. Those are saved in `data/connections.json`, readable by the
+owner only, and win over `.env`; removing one there falls back to the `.env` value. Nothing else can be set that
+way.
+
 ## LLM
 
 | variable | default | |
@@ -21,13 +26,18 @@ Settings come from environment variables, read from `.env` in the repository roo
 
 | variable | default | |
 |---|---|---|
-| `DEFAULT_VENUE` | `wallex` | `wallex` or `tse`; where orders go and what the dashboard shows |
+| `DEFAULT_VENUE` | `wallex` | any venue key (`wallex`, `nobitex`, `bitpin`, `ramzinex`, `tabdeal`, `binance`, `tse`); where orders go and what the dashboard shows |
 | `WALLEX_BASE_URL` | `https://api.wallex.ir` | |
 | `WALLEX_API_KEY` | | only for live trading and real balances |
 | `WALLEX_SUB_ACCOUNT_CLIENT_ID` | | trade on a trade-credit sub-account; empty = the main account |
 | `WALLEX_FUTURES_BASE_URL` | | futures endpoints aren't public; leave empty and use paper futures |
+| `NOBITEX_API_KEY`, `NOBITEX_PRIVATE_KEY` | | a Nobitex API key and its Ed25519 private key (shown once when the key is made) |
+| `NOBITEX_TOKEN` | | or the older login token from the panel, instead of an API key |
+| `BITPIN_API_KEY`, `BITPIN_SECRET_KEY` | | |
+| `RAMZINEX_API_KEY`, `RAMZINEX_SECRET` | | |
+| `NAVASAN_API_KEY` | | free key from navasan.tech for free-market currency and gold rates |
 
-The `tse` venue is read-only and needs no credentials. See [Venues](venues.md).
+`tabdeal`, `binance`, `tetherland` and `tse` are read-only and need no credentials. See [Venues](venues.md).
 
 Lock exchange API keys to your server's IP, and give them trading permission only, never withdrawal.
 

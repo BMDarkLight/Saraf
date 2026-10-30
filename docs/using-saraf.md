@@ -86,8 +86,23 @@ the time left in the session, and the same on/off switch as the trade page.
 | ![Settings](screenshots/strategy-tuning.png) | ![Copy-trading](screenshots/strategy-personas.png) |
 | ![Strategy assistant](screenshots/strategy-chat.png) | ![Evidence](screenshots/strategy-evidence.png) |
 
+## Settings page
+
+**تنظیمات** holds what used to need `.env` and a restart:
+
+- **اتصال‌ها** (connections): a card per venue with what it supports, whether a key is set, and its key fields.
+  **آزمایش اتصال** (test) reads the account behind the key, or the market list for a venue without one. **ذخیره**
+  (save) applies at once. Saved keys never come back to the browser; a field shows only the last four characters
+  and whether the value came from the app or from `.env`. **پیش‌فرض شود** makes a venue the default: orders, the
+  dashboard and alerts move to it, each venue keeping its own paper balances. In live mode, changing the default venue
+  or its keys asks for confirmation first.
+- **مدل هوش مصنوعی** (AI model): the chat assistant's endpoint, key and model, with a test button. The engine keeps
+  its own `ENGINE_LLM_*` settings.
+
+When more than one venue has a key, the account card on the trade page gets a picker to view each venue's balances.
+
 ## Mobile
 
-On narrow screens the columns become tabs at the bottom: market, agent, holdings, strategy.
+On narrow screens the columns become tabs at the bottom: market, agent, holdings, strategy, settings.
 
 <img src="screenshots/mobile-chat.png" alt="Mobile" width="320">

@@ -23,6 +23,8 @@ venue, so adding an exchange means writing one adapter.
   copy-trading of real traders and a strategy assistant.
 - **Any model**: OpenAI, OpenRouter, vLLM, Ollama, LM Studio. Small local models work too.
 - **Persian first**: an RTL Persian UI with light and dark themes that works on phones.
+- **Settings in the app**: exchange keys, the default venue and the chat model are set from the settings screen and
+  apply without a restart.
 
 ## Screenshots
 
@@ -44,7 +46,7 @@ More in [Using Saraf](docs/using-saraf.md).
 ## Quick start
 
 ```bash
-cp .env.example .env          # LLM_BASE_URL / LLM_API_KEY / LLM_MODEL; venue keys only for live trading
+cp .env.example .env          # optional: the LLM and venue keys can also be set in the app's settings screen
 cd frontend && npm install && npm run build && cd ..
 cd backend && uv sync && uv run python -m saraf.server
 ```
@@ -64,15 +66,20 @@ See [Getting started](docs/getting-started.md) for LLM providers, local models a
 
 ## Venues
 
-| venue | asset class | market data | order book | candles | trading | status |
-|---|---|---|---|---|---|---|
-| `wallex` | crypto, TMN and USDT markets | ✓ | ✓ | 1m to 1D | spot, live and paper; futures paper only | full adapter |
-| `tse` (Tehran Stock Exchange) | equities, IRR | ✓ (TSETMC) | 5 levels | daily | none | read-only |
-| Nobitex, Bitpin, Ramzinex | crypto | | | | | planned |
-| Free-market currency and gold rates | fx | | | | | planned |
+| venue | asset class | market data | order book | candles | trading |
+|---|---|---|---|---|---|
+| `wallex` | crypto, TMN and USDT markets | ✓ | ✓ | 1m to 1D | spot, live and paper; futures paper only |
+| `nobitex` | crypto, TMN and USDT markets | ✓ | ✓ | 1m to 1D | spot, live and paper |
+| `bitpin` | crypto, TMN and USDT markets | ✓ | ✓ | 1m to 1D | spot, live and paper |
+| `ramzinex` | crypto, TMN and USDT markets | ✓ | ✓ | 1m to 1D | spot, live and paper |
+| `tabdeal` | crypto, TMN and USDT markets | ✓ | ✓ | 1m to 1D | paper only |
+| `binance` | crypto, global USDT reference | ✓ | ✓ | 1m to 1D | paper only |
+| `tetherland`, `navasan` | fx: USDT, dollar, euro, coins, gold | prices | | | none |
+| `tse` (Tehran Stock Exchange) | equities, IRR | ✓ (TSETMC) | 5 levels | daily | none |
 
-`DEFAULT_VENUE` is where orders go and what the dashboard shows. Every tool and market-data endpoint also takes a
-`venue`. [Venues](docs/venues.md) covers the interface and how to add an exchange.
+Connect venues and pick the default one in the app under **تنظیمات ← اتصال‌ها** (or in `.env`). The default venue
+is where orders go and what the dashboard shows; every tool and market-data endpoint also takes a `venue`.
+[Venues](docs/venues.md) covers each adapter, the interface and how to add an exchange.
 
 ## Documentation
 
